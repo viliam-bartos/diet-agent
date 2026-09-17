@@ -1,7 +1,5 @@
 """Tests for the FastAPI web dashboard and its REST endpoints."""
 
-import shutil
-import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -9,34 +7,41 @@ import pytest
 from fastapi.testclient import TestClient
 
 import nutrition_agent.web as web_module
-from nutrition_agent.db import SCHEMA_SQL, get_connection, init_db
+from nutrition_agent.db import get_connection, init_db
 from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog, CalculatedWorkoutLog
 from nutrition_agent.repository import save_food_logs, save_weight_log, save_workout_log
 
-# Sandbox restricts the OS temp directory, so test databases live in a workspace folder.
-TEST_TMP_ROOT = Path(__file__).resolve().parent.parent / ".tmp" / "tests"
+# Sandbox restricts the OS temp directory, so the test database lives in a workspace folder.
+# One reused file keeps the workspace clean; each test truncates the tables first.
+TEST_DB_PATH = Path(__file__).resolve().parent.parent / ".tmp" / "tests" / "web_api_test.db"
+
+
+def _reset_tables(db_path: Path) -> None:
+    """Ensure the schema exists and remove all rows from previous tests."""
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        for table in ("food_logs", "weight_logs", "workout_logs", "user_settings"):
+            conn.execute(f"DELETE FROM {table}")
+        conn.commit()
+    finally:
+        conn.close()
 
 
 @pytest.fixture
 def temp_db_path() -> Path:
-    """Provide an isolated SQLite path inside the workspace and clean it up."""
-    TEST_TMP_ROOT.mkdir(parents=True, exist_ok=True)
-    db_dir = TEST_TMP_ROOT / uuid.uuid4().hex
-    db_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        yield db_dir / "test_dashboard.db"
-    finally:
-        shutil.rmtree(db_dir, ignore_errors=True)
+    """Provide the shared workspace test database path."""
+    TEST_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    return TEST_DB_PATH
 
 
 @pytest.fixture
 def api_client(temp_db_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     """TestClient backed by a temporary SQLite database with seeded data."""
     db_path = temp_db_path
-    init_db(db_path)
+    _reset_tables(db_path)
 
     conn = get_connection(db_path)
-    conn.executescript(SCHEMA_SQL)
 
     today = datetime.now()
     for offset in range(5):
@@ -250,7 +255,7 @@ def test_api_kpis_applies_time_window(api_client: TestClient):
 def test_create_app_upgrades_legacy_schema(temp_db_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Starting the web app adds tables missing from older database files."""
     legacy_schema = """
-    CREATE TABLE IF NOT EXISTS food_logs (
+    CREATE TABLE food_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         logged_at TEXT NOT NULL,
         raw_input TEXT NOT NULL,
@@ -265,10 +270,25 @@ def test_create_app_upgrades_legacy_schema(temp_db_path: Path, monkeypatch: pyte
         fats REAL NOT NULL
     );
     """
+    # Rebuild the file as a legacy database that only has food_logs
     legacy_conn = get_connection(temp_db_path)
+    for table in ("food_logs", "weight_logs", "workout_logs", "user_settings"):
+        legacy_conn.execute(f"DROP TABLE IF EXISTS {table}")
     legacy_conn.executescript(legacy_schema)
     legacy_conn.commit()
     legacy_conn.close()
+
+    pre_conn = get_connection(temp_db_path)
+    try:
+        pre_tables = {
+            row[0]
+            for row in pre_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    finally:
+        pre_conn.close()
+    assert "workout_logs" not in pre_tables
 
     settings_override = type(web_module.settings)(
         database_path=temp_db_path,
