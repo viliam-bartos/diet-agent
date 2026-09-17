@@ -1,5 +1,7 @@
 """Discord bot implementation using discord.py and modern Slash Commands."""
 
+import base64
+import binascii
 import logging
 from datetime import datetime
 
@@ -40,6 +42,12 @@ def render_discord_progress_bar(current: float, target: float, width: int = 12) 
     return f"[{bar}] {pct} %"
 
 
+def _names(synced: list[app_commands.AppCommand]) -> str:
+    """Format synced command names for logging."""
+    names = sorted(command.name for command in synced)
+    return ", ".join(names) if names else "(zadne)"
+
+
 def build_dashboard_view() -> discord.ui.View:
     """Build persistent Discord UI button opening the web dashboard."""
     view = discord.ui.View()
@@ -66,8 +74,39 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
 
     @client.event
     async def on_ready():
-        await tree.sync()
-        logger.info("Discord bot prihlasen jako %s a slash prikazy synchronizovany.", client.user)
+        # Guild-scoped sync makes commands appear instantly; global sync can take an hour.
+        guild_id = settings.discord_guild_id
+        if guild_id:
+            guild = discord.Object(id=guild_id)
+            tree.copy_global_to(guild=guild)
+            synced = await tree.sync(guild=guild)
+            logger.info("Slash prikazy synchronizovany pro server %s: %s", guild_id, _names(synced))
+            print(f"Slash prikazy nacteny pro server {guild_id}: {_names(synced)}")
+        else:
+            synced = await tree.sync()
+            logger.info("Globalni slash prikazy synchronizovany: %s", _names(synced))
+
+        print(f"Bot prihlasen jako {client.user} (ID: {client.user.id})")
+        print(f"Sledovanych serveru: {len(client.guilds)}")
+
+        if not client.guilds:
+            print()
+            print("POZOR: bot zatim neni na zadnem serveru, takze na nej nikdo nevidi.")
+            print("Pozvi ho pres tuto adresu a vyber svuj server:")
+            print(f"  {build_invite_url(client.application_id)}")
+            print()
+        else:
+            for guild in client.guilds:
+                print(f"  - {guild.name} (ID: {guild.id})")
+            if not settings.discord_guild_id:
+                print()
+                print("Pro okamzite nacteni slash prikazu pridej do .env:")
+                print(f"  DISCORD_GUILD_ID={client.guilds[0].id}")
+                print()
+
+        print(
+            "Bot je pripraven. Napis mu zpravu nebo pouzij /dnes, /vaha, /trenink, /prehled, /web."
+        )
 
     @client.event
     async def on_message(message: discord.Message):
@@ -78,6 +117,8 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
         clean_text = message.content.strip()
         if not clean_text:
             return
+
+        logger.info("Prijata zprava od %s: %s", message.author, clean_text[:80])
 
         conn = get_connection(settings.database_path)
         foods = load_foods_from_json(settings.foods_data_path)
@@ -277,18 +318,81 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
     return client, tree
 
 
+def application_id_from_token(token: str) -> int | None:
+    """Decode the bot application ID from the first segment of a Discord token."""
+    first_segment = token.split(".", 1)[0]
+    padded = first_segment + "=" * (-len(first_segment) % 4)
+    try:
+        return int(base64.b64decode(padded).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, binascii.Error):
+        return None
+
+
+def build_invite_url(application_id: int) -> str:
+    """Build the OAuth2 invite URL requesting bot and command scopes."""
+    permissions = discord.Permissions(
+        view_channel=True,
+        send_messages=True,
+        embed_links=True,
+        read_message_history=True,
+    )
+    return discord.utils.oauth_url(
+        application_id,
+        permissions=permissions,
+        scopes=("bot", "applications.commands"),
+    )
+
+
+def describe_startup() -> None:
+    """Print the invite URL and configuration summary before connecting."""
+    token = settings.require_discord_token()
+    app_id = application_id_from_token(token)
+
+    print("Spoustim Discord bota...")
+    if app_id:
+        print("Pokud bot na serveru jeste neni, pozvi ho pres tuto adresu:")
+        print(f"  {build_invite_url(app_id)}")
+        print()
+    if settings.discord_guild_id:
+        print(f"Rychla synchronizace prikazu je zapnuta pro server {settings.discord_guild_id}.")
+    else:
+        print(
+            "DISCORD_GUILD_ID neni nastaveno, prikazy se registruji globalne "
+            "(mohou se objevit az za hodinu)."
+        )
+    print()
+
+
 async def run_bot_async() -> None:
     """Run Discord bot client asynchronously."""
     token = settings.require_discord_token()
     client, _ = create_bot()
-    await client.start(token)
+
+    try:
+        await client.start(token)
+    except discord.LoginFailure as exc:
+        raise SystemExit(
+            "Discord odmitl prihlaseni: neplatny DISCORD_BOT_TOKEN v .env.\n"
+            "Zkopiruj token z Discord Developer Portal -> Bot -> Reset Token."
+        ) from exc
+    except discord.PrivilegedIntentsRequired as exc:
+        raise SystemExit(
+            "Discord odmitl prihlaseni: bot nema povoleny privilegovany intent 'Message Content'.\n"
+            "Zapni ho na https://discord.com/developers/applications -> tvoje aplikace -> "
+            "Bot -> Privileged Gateway Intents -> Message Content Intent -> Save Changes."
+        ) from exc
 
 
 def run_bot() -> None:
     """Synchronous entry point to run Discord bot."""
     import asyncio
 
-    asyncio.run(run_bot_async())
+    describe_startup()
+
+    try:
+        asyncio.run(run_bot_async())
+    except KeyboardInterrupt:
+        print("\nBot ukoncen.")
 
 
 if __name__ == "__main__":

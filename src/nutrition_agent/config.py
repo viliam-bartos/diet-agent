@@ -18,6 +18,7 @@ class Settings:
     log_level: str
     gemini_api_key: str | None
     discord_bot_token: str | None = None
+    discord_guild_id: int | None = None
     web_host: str = "127.0.0.1"
     web_port: int = 8000
     target_calories: float | None = None
@@ -38,6 +39,8 @@ class Settings:
         log_level = os.getenv("LOG_LEVEL", "INFO")
         gemini_api_key = os.getenv("GEMINI_API_KEY")
         discord_bot_token = os.getenv("DISCORD_BOT_TOKEN")
+        guild_id_raw = os.getenv("DISCORD_GUILD_ID")
+        discord_guild_id = int(guild_id_raw) if guild_id_raw and guild_id_raw.strip() else None
         web_host = os.getenv("WEB_HOST", "127.0.0.1")
         web_port = int(os.getenv("WEB_PORT", "8000"))
 
@@ -53,6 +56,7 @@ class Settings:
             log_level=log_level.upper(),
             gemini_api_key=gemini_api_key,
             discord_bot_token=discord_bot_token,
+            discord_guild_id=discord_guild_id,
             web_host=web_host,
             web_port=web_port,
             target_calories=target_calories,

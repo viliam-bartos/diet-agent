@@ -149,6 +149,15 @@ python -m nutrition_agent.bot
 
 Bot kombinuje přímé naslouchání na zprávy s moderními Slash Commands. Veškeré DB dotazy a agregace řeší `repository.py`; bot pouze skládá odpovědi.
 
+### Zprovoznění bota
+
+1. Vytvoř aplikaci na https://discord.com/developers/applications a v sekci **Bot** vygeneruj token. Ten vlož do `.env` jako `DISCORD_BOT_TOKEN`.
+2. V sekci **Bot → Privileged Gateway Intents** zapni **Message Content Intent**. Bez něj se bot nepřihlásí, protože potřebuje číst text zpráv.
+3. Pozvi bota na server. Spuštěním `nutrition-agent --bot` se vypíše pozvánkový odkaz (obsahuje scopes `bot` a `applications.commands`) — stačí ho otevřít v prohlížeči a vybrat server. Případně si odkaz vygeneruj ručně přes **OAuth2 → URL Generator**.
+4. Volitelně nastav `DISCORD_GUILD_ID` na ID svého serveru (v Discordu zapni *Nastavení → Rozšířené → Vývojářský režim*, pak klikni pravým na server → *Kopírovat ID serveru*). Slash příkazy se pak zaregistrují okamžitě. Bez tohoto ID se registrují globálně, což může trvat až hodinu.
+
+Bot umí odpovídat v přímých zprávách i ve zmíněném kanálu. Aby mohl odpovídat v kanálu, musí mít oprávnění *Posílat zprávy* a *Vkládat odkazy*.
+
 ### Přirozená konverzace
 
 Zpráva v DM nebo ve vyhrazeném kanálu (např. `200g kuřecích prsou a 150g rýže`) projde stejnou pipeline jako CLI. Odpověď je Discord Embed:

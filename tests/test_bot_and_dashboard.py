@@ -340,6 +340,50 @@ def test_bot_message_content_intent_is_enabled(monkeypatch: pytest.MonkeyPatch):
     assert client.intents.message_content is True
 
 
+def test_application_id_decoded_from_token():
+    """The bot application ID is decoded from the first token segment."""
+    import base64
+
+    import nutrition_agent.bot as bot_module
+
+    app_id = 1550206419297636394
+    encoded = base64.b64encode(str(app_id).encode()).decode().rstrip("=")
+    token = f"{encoded}.abcdef.ghijklmnopqrstuvwxyz0123456789"
+
+    assert bot_module.application_id_from_token(token) == app_id
+
+
+def test_application_id_returns_none_for_garbage():
+    """Malformed tokens do not raise, they return None."""
+    import nutrition_agent.bot as bot_module
+
+    assert bot_module.application_id_from_token("") is None
+    assert bot_module.application_id_from_token("not-a-token") is None
+
+
+def test_build_invite_url_requests_bot_and_command_scopes():
+    """The invite URL must request both bot and applications.commands scopes."""
+    import nutrition_agent.bot as bot_module
+
+    url = bot_module.build_invite_url(123456789)
+    assert url.startswith("https://discord.com/oauth2/authorize?")
+    assert "client_id=123456789" in url
+    assert "applications.commands" in url
+    assert "scope=bot" in url
+
+
+def test_guild_id_from_env(monkeypatch: pytest.MonkeyPatch):
+    """DISCORD_GUILD_ID is parsed into an int for instant command sync."""
+    from nutrition_agent.config import Settings
+
+    monkeypatch.setenv("DISCORD_GUILD_ID", "987654321098765432")
+    parsed = Settings.load()
+    assert parsed.discord_guild_id == 987654321098765432
+
+    monkeypatch.setenv("DISCORD_GUILD_ID", "")
+    assert Settings.load().discord_guild_id is None
+
+
 def test_bot_requires_token_fail_fast(monkeypatch: pytest.MonkeyPatch):
     """Running the bot without a token raises a clear configuration error."""
     import asyncio
@@ -352,6 +396,7 @@ def test_bot_requires_token_fail_fast(monkeypatch: pytest.MonkeyPatch):
         log_level="WARNING",
         gemini_api_key=None,
         discord_bot_token=None,
+        discord_guild_id=None,
         web_host="127.0.0.1",
         web_port=8000,
         target_calories=None,
