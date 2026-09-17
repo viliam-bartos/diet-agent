@@ -263,6 +263,77 @@ def run_interactive_loop(foods: list[FoodDefinition], conn: sqlite3.Connection) 
         print(response)
 
 
+def run_all_services(include_bot: bool = True, open_browser: bool = False) -> None:
+    """Run the web dashboard, optionally with the Discord bot, in one event loop.
+
+    The web dashboard keeps running even when the Discord bot cannot start, so a
+    missing or invalid bot token never takes the dashboard down with it.
+    """
+    import asyncio
+    import webbrowser
+
+    import uvicorn
+
+    web_url = f"http://{settings.web_host}:{settings.web_port}"
+    print(f"Web dashboard: {web_url}")
+
+    has_discord_token = bool(settings.discord_bot_token and settings.discord_bot_token.strip())
+    if not include_bot:
+        print("Discord bot: vypnut (rezim pouze web)")
+    elif has_discord_token:
+        print("Discord bot: spoustim")
+    else:
+        print("Discord bot: preskocen (DISCORD_BOT_TOKEN neni nastaven v .env)")
+    print("Pro ukonceni stisknete Ctrl+C.")
+    print()
+
+    start_bot = include_bot and has_discord_token
+
+    async def _serve_bot() -> None:
+        from nutrition_agent.bot import run_bot_async
+
+        try:
+            await run_bot_async()
+        except (Exception, SystemExit) as exc:
+            print()
+            print(f"Discord bot skoncil: {exc}")
+            print("Web dashboard bezi dal. Pro ukonceni stisknete Ctrl+C.")
+
+    async def _open_browser_when_ready(server: uvicorn.Server) -> None:
+        for _ in range(100):
+            if server.started:
+                break
+            await asyncio.sleep(0.1)
+        webbrowser.open(web_url)
+
+    async def _serve_all() -> None:
+        from nutrition_agent.web import create_app
+
+        config = uvicorn.Config(
+            create_app(),
+            host=settings.web_host,
+            port=settings.web_port,
+            log_level="info",
+        )
+        server = uvicorn.Server(config)
+
+        tasks = [asyncio.create_task(server.serve())]
+        if start_bot:
+            tasks.append(asyncio.create_task(_serve_bot()))
+        if open_browser:
+            tasks.append(asyncio.create_task(_open_browser_when_ready(server)))
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                print(f"Sluzba skoncila s chybou: {result}")
+
+    try:
+        asyncio.run(_serve_all())
+    except KeyboardInterrupt:
+        print("\nUkonceno.")
+
+
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -343,13 +414,16 @@ def main() -> None:
         action="store_true",
         help="Spustit souběžně webový dashboard server i Discord bota",
     )
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Po startu webového dashboardu otevřít prohlížeč",
+    )
     args = parser.parse_args()
 
     # Standalone service runners
     if args.web or (args.message and args.message[0] == "web"):
-        from nutrition_agent.web import run_server
-
-        run_server()
+        run_all_services(include_bot=False, open_browser=args.open_browser)
         return
 
     if args.bot or (args.message and args.message[0] == "bot"):
@@ -359,24 +433,7 @@ def main() -> None:
         return
 
     if args.run_all or (args.message and args.message[0] in ("run", "all")):
-        import asyncio
-
-        import uvicorn
-
-        from nutrition_agent.bot import run_bot_async
-        from nutrition_agent.web import create_app
-
-        async def _run_both():
-            config = uvicorn.Config(
-                create_app(),
-                host=settings.web_host,
-                port=settings.web_port,
-                log_level="info",
-            )
-            server = uvicorn.Server(config)
-            await asyncio.gather(server.serve(), run_bot_async())
-
-        asyncio.run(_run_both())
+        run_all_services(include_bot=True, open_browser=args.open_browser)
         return
 
     init_db(settings.database_path)

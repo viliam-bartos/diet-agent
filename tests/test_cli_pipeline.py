@@ -271,3 +271,107 @@ def test_handle_weight_log_recomputes_targets(
     report = handle_user_message("dnes", foods, conn)
     assert "90.0 kg" in report
     assert "3415" in report  # 90 kg * (3150 / 83) rounded
+
+
+def _capture_service_call(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> dict[str, object]:
+    """Run cli.main() with argv and capture how the service runner was invoked."""
+    import nutrition_agent.cli as cli_module
+
+    captured: dict[str, object] = {}
+
+    def fake_run_all_services(*, include_bot: bool = True, open_browser: bool = False) -> None:
+        captured["include_bot"] = include_bot
+        captured["open_browser"] = open_browser
+        captured["called"] = True
+
+    monkeypatch.setattr(cli_module, "run_all_services", fake_run_all_services)
+    monkeypatch.setattr("sys.argv", ["nutrition-agent", *argv])
+    cli_module.main()
+    return captured
+
+
+def test_cli_web_flag_runs_dashboard_without_bot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--web starts only the dashboard and returns before touching the database."""
+    captured = _capture_service_call(monkeypatch, ["--web"])
+    assert captured["called"] is True
+    assert captured["include_bot"] is False
+    assert captured["open_browser"] is False
+
+
+def test_cli_web_flag_with_open_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--web --open-browser forwards the browser request."""
+    captured = _capture_service_call(monkeypatch, ["--web", "--open-browser"])
+    assert captured["include_bot"] is False
+    assert captured["open_browser"] is True
+
+
+def test_cli_run_all_flag_includes_bot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--run-all starts both services and can open the dashboard."""
+    captured = _capture_service_call(monkeypatch, ["--run-all", "--open-browser"])
+    assert captured["include_bot"] is True
+    assert captured["open_browser"] is True
+
+
+def test_cli_czech_aliases_for_services(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bare 'web' and 'run' words work as service commands."""
+    assert _capture_service_call(monkeypatch, ["web"])["include_bot"] is False
+    assert _capture_service_call(monkeypatch, ["run"])["include_bot"] is True
+
+
+def test_run_all_services_skips_bot_without_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing Discord token must not prevent the dashboard from starting."""
+    import asyncio
+    import sys
+
+    import nutrition_agent.cli as cli_module
+
+    settings_override = type(cli_module.settings)(
+        database_path=cli_module.settings.database_path,
+        foods_data_path=cli_module.settings.foods_data_path,
+        log_level="WARNING",
+        gemini_api_key=None,
+        discord_bot_token=None,
+        discord_guild_id=None,
+        web_host="127.0.0.1",
+        web_port=8000,
+        target_calories=None,
+        target_protein_g=None,
+    )
+    monkeypatch.setattr(cli_module, "settings", settings_override)
+
+    started: list[str] = []
+
+    class FakeServer:
+        def __init__(self, config: object) -> None:
+            self.started = True
+
+        async def serve(self) -> None:
+            started.append("web")
+            await asyncio.sleep(0)
+
+    class FakeUvicorn:
+        Server = FakeServer
+
+        class Config:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+    monkeypatch.setitem(sys.modules, "uvicorn", FakeUvicorn)
+
+    cli_module.run_all_services(include_bot=True, open_browser=False)
+
+    assert started == ["web"]
+
+
+def test_start_bat_exists_and_calls_run_all() -> None:
+    """The double-click launcher must exist and start both services."""
+    from pathlib import Path
+
+    bat_path = Path(__file__).resolve().parent.parent / "start.bat"
+    assert bat_path.exists()
+
+    content = bat_path.read_text(encoding="ascii")
+    assert "--run-all" in content
+    assert "--open-browser" in content
+    assert ".venv\\Scripts\\python.exe" in content
+    assert "pause" in content

@@ -17,6 +17,7 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
 - `src/nutrition_agent/reporting.py`: Textové přehledy a grafy pro denní, týdenní, měsíční, půlroční, roční a kompletní období.
 - `src/nutrition_agent/config.py`: Konfigurace aplikace a načítání proměnných prostředí.
 - `src/nutrition_agent/cli.py`: Rozhraní příkazové řádky pro interaktivní režim, jednorázové zprávy a spouštění služeb.
+- `start.bat`: Spouštěč pro Windows — dvojklikem nastartuje web i bota a otevře dashboard.
 - `src/nutrition_agent/bot.py`: Discord bot se Slash Commands a nasloucháním na zprávy.
 - `src/nutrition_agent/web.py`: FastAPI server a REST API dashboardu.
 - `src/nutrition_agent/templates/dashboard.html`: HTML šablona dashboardu s čistým CSS a Chart.js.
@@ -63,6 +64,7 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
    ```env
    GEMINI_API_KEY=tvuj-gemini-api-klic
    DISCORD_BOT_TOKEN=tvuj-discord-token
+   DISCORD_GUILD_ID=id-tveho-serveru
    DATABASE_PATH=data/nutrition.db
    FOODS_DB_PATH=data/foods.json
    LOG_LEVEL=INFO
@@ -73,6 +75,22 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
    ```
 
    `TARGET_CALORIES` a `TARGET_PROTEIN_G` jsou volitelné. Pokud nejsou nastavené, dashboard použije cíle odvozené z aktuální váhy, aktivního stavu a typu dne.
+
+   `DISCORD_GUILD_ID` je volitelné, ale doporučené — slash příkazy se pak v Discordu zaregistrují okamžitě místo až hodinového čekání.
+
+---
+
+## Rychlý start na Windows
+
+Po instalaci stačí dvojkliknout na **`start.bat`** v kořeni projektu. Skript:
+
+1. ověří, že existuje `.venv` a `.env` a že jsou doinstalované závislosti,
+2. spustí webový dashboard i Discord bota v jednom okně,
+3. otevře dashboard v prohlížeči.
+
+Ukončení: `Ctrl+C` v okně, případně potvrď `Y`. Při chybějící konfiguraci skript vypíše, který příkaz máš spustit, a okno nechá otevřené.
+
+Ekvivalentní příkaz pro ruční spuštění je `nutrition-agent --run-all --open-browser`.
 
 ---
 
@@ -132,10 +150,13 @@ nutrition-agent --history 10
 
 Webový dashboard i Discord bota lze spustit samostatně nebo souběžně:
 ```bash
-nutrition-agent --web       # Pouze webový dashboard na WEB_HOST:WEB_PORT
-nutrition-agent --bot       # Pouze Discord bot
-nutrition-agent --run-all   # Obojí souběžně v jednom asyncio event loopu
+nutrition-agent --web                  # Pouze webový dashboard na WEB_HOST:WEB_PORT
+nutrition-agent --bot                  # Pouze Discord bot
+nutrition-agent --run-all              # Obojí souběžně v jednom asyncio event loopu
+nutrition-agent --run-all --open-browser  # Navíc otevře dashboard v prohlížeči
 ```
+
+Přepínač `--open-browser` funguje i s `--web`. Pokud v `.env` chybí `DISCORD_BOT_TOKEN`, režim `--run-all` bota přeskočí s upozorněním a dashboard poběží dál. Stejně tak pád bota během běhu nezastaví webový dashboard.
 
 Alternativně lze služby spustit jako moduly:
 ```bash
