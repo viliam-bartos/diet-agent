@@ -141,7 +141,8 @@ def test_handle_command_dnes_and_prehled(
 
     # Empty day first
     result_empty = handle_user_message("dnes", foods, conn)
-    assert "Denní přehled" in result_empty or "nejsou evidovány žádné záznamy" in result_empty
+    assert "Denní souhrn" in result_empty
+    assert "Za vybrané období nebyly nalezeny žádné záznamy" in result_empty
 
     # Log an item
     def mock_parser(msg: str) -> UserLog:
@@ -160,10 +161,10 @@ def test_handle_command_dnes_and_prehled(
     handle_user_message("200g kuřecí prsa", foods, conn, parse_fn=mock_parser)
 
     result_after = handle_user_message("prehled", foods, conn)
-    assert "Denní přehled" in result_after
+    assert "Denní souhrn" in result_after
     assert "Kuřecí prsa" in result_after
-    assert "Součet za den:" in result_after
-    assert "Energie: 212.0 kcal" in result_after
+    assert "Přehled plnění denního cíle:" in result_after
+    assert "Energie:" in result_after
 
 
 def test_handle_command_historie(

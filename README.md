@@ -76,9 +76,12 @@ nutrition-agent
 
 Příklady vstupů:
 - `Dneska k obědu 200g kuřecích prsou a 150g rýže`
-- `Váha 82.4 kg`
+- `Váha 83.2 kg` (automaticky přepočítá nutriční cíle pro novou váhu)
 - `2 vejce a 1 banán`
-- `dnes` nebo `prehled` pro zobrazení denního souhrnu stravy a tělesné hmotnosti
+- `dnes` nebo `prehled` pro zobrazení denního souhrnu, plnění cílů a zbývajících hodnot
+- `tyden`, `mesic`, `pulrok`, `rok`, `vse` pro agregované přehledy s grafy
+- `cil bulk`, `cil maintenance`, `cil cut` pro změnu aktivního stavu
+- `den trenink` nebo `den odpocinek` pro přepnutí tréninkového stavu
 - `historie` pro zobrazení posledních záznamů
 
 Ukončení interaktivního režimu zadáním `konec`, `exit` nebo `quit`.
@@ -90,15 +93,46 @@ Zprávu lze předat přímo jako argument:
 nutrition-agent "150g hovězího a 200g brambor"
 ```
 
-Zobrazení denního souhrnu:
+Zobrazení přehledů podle období:
 ```bash
-nutrition-agent --today
+nutrition-agent --today       # Dnešní plnění cílů a chybějící živiny
+nutrition-agent --week        # Týdenní souhrn (posledních 7 dní)
+nutrition-agent --month       # Měsíční souhrn (posledních 30 dní)
+nutrition-agent --half-year   # Půlroční souhrn (posledních 180 dní)
+nutrition-agent --year        # Roční souhrn (posledních 365 dní)
+nutrition-agent --all         # Kompletní souhrn ze všech dat
+```
+
+Nastavení aktivního cíle a typu dne:
+```bash
+nutrition-agent --goal lean_bulk   # Možnosti: lean_bulk, maintenance, cut
+nutrition-agent --day-type training # Možnosti: training, rest
 ```
 
 Zobrazení historie posledních N záznamů:
 ```bash
 nutrition-agent --history 10
 ```
+
+---
+
+## Nutriční stavy a dynamický přepočet na váhu
+
+Systém počítá energetickou bilanci a makroživiny dynamicky podle aktuální tělesné hmotnosti (kalibrováno na 83 kg referenční váhy):
+
+1. **Lean Bulk (čisté nabírání)**:
+   - Tréninkový den: ~3 150 kcal, Bílkoviny: ~155 g DIAAS (~1.87 g/kg), Tuky: ~82.5 g (~1.0 g/kg), Sacharidy: ~430 g (~5.18 g/kg)
+   - Netréninkový den: ~2 650 kcal, Bílkoviny: ~145 g DIAAS (~1.75 g/kg), Tuky: ~77.5 g (~0.93 g/kg), Sacharidy: ~340 g (~4.10 g/kg)
+
+2. **Maintenance (udržování váhy)**:
+   - Tréninkový den: ~2 750 kcal, Bílkoviny: ~150 g DIAAS (~1.81 g/kg), Tuky: ~82.5 g, Sacharidy: ~320 g
+   - Netréninkový den: ~2 475 kcal, Bílkoviny: ~145 g DIAAS (~1.75 g/kg), Tuky: ~80.0 g, Sacharidy: ~310 g
+
+3. **Cut (rýsování / redukce)**:
+   - Tréninkový den: ~2 200 kcal, Bílkoviny: ~175 g DIAAS (~2.11 g/kg), Tuky: ~68.0 g, Sacharidy: ~215 g
+   - Netréninkový den: ~2 150 kcal, Bílkoviny: ~175 g DIAAS (~2.11 g/kg), Tuky: ~65.0 g, Sacharidy: ~205 g
+
+Při zaznamenání nové tělesné hmotnosti se všechny cíle okamžitě a automaticky přepočítají.
 
 ---
 

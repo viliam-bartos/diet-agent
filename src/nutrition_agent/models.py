@@ -1,5 +1,6 @@
 """Data models, schemas, and custom exceptions for Nutrition Agent."""
 
+import contextlib
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
@@ -114,6 +115,41 @@ class UserLog(BaseModel):
         default=None,
         description="Stručný důvod chyby, pokud log_type='INVALID'",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_llm_payload(cls, data: object) -> object:
+        """Normalize raw dictionary from LLM before strict validation."""
+        if not isinstance(data, dict):
+            return data
+
+        # Normalize log_type if present
+        log_type = data.get("log_type")
+        if isinstance(log_type, str):
+            data["log_type"] = log_type.upper().strip()
+
+        if data.get("log_type") == "WEIGHT":
+            # If weight_kg is missing, inspect alternative field names
+            if data.get("weight_kg") is None:
+                for alt_key in ("weight", "body_weight", "value", "vaha", "hodnota"):
+                    if alt_key in data and data[alt_key] is not None:
+                        try:
+                            data["weight_kg"] = float(str(data[alt_key]).replace(",", "."))
+                            break
+                        except (ValueError, TypeError):
+                            pass
+
+            # If still missing, check if model erroneously put the weight into items
+            if data.get("weight_kg") is None and data.get("items"):
+                first_item = data["items"][0]
+                if isinstance(first_item, dict) and first_item.get("amount"):
+                    with contextlib.suppress(ValueError, TypeError):
+                        data["weight_kg"] = float(first_item["amount"])
+
+            # In WEIGHT logs, items must always be empty
+            data["items"] = []
+
+        return data
 
     @field_validator("weight_kg")
     @classmethod

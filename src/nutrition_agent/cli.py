@@ -18,67 +18,22 @@ from nutrition_agent.nutrition import (
     find_matching_food,
     validate_body_weight,
 )
+from nutrition_agent.reporting import format_daily_target_breakdown, generate_period_report
 from nutrition_agent.repository import (
     get_daily_food_logs,
-    get_latest_weight_log,
     get_recent_food_logs,
     get_recent_weight_logs,
+    get_user_profile,
     load_foods_from_json,
     save_food_logs,
     save_weight_log,
+    set_user_setting,
 )
-
-
-def format_daily_summary(conn: sqlite3.Connection, target_date: str | None = None) -> str:
-    """Format daily nutrition totals and meal breakdown for a given date."""
-    date_str = target_date or datetime.now().strftime("%Y-%m-%d")
-    food_logs = get_daily_food_logs(conn, date_str)
-    latest_weight = get_latest_weight_log(conn, date_str)
-
-    if not food_logs and latest_weight is None:
-        return f"Pro datum {date_str} nejsou evidovány žádné záznamy."
-
-    lines = [f"Denní přehled ({date_str}):"]
-
-    if food_logs:
-        lines.append(f"Zaznamenaná jídla ({len(food_logs)}):")
-        total_kcal = 0.0
-        total_prot_usable = 0.0
-        total_prot_raw = 0.0
-        total_carbs = 0.0
-        total_fats = 0.0
-
-        for item in food_logs:
-            time_part = item.logged_at[11:16] if len(item.logged_at) >= 16 else ""
-            prefix = f"- [{time_part}] " if time_part else "- "
-            est_flag = " (odhad)" if item.is_estimated else ""
-            state_flag = f" ({item.state})" if item.state == "cooked" else ""
-            lines.append(
-                f"{prefix}{item.food_name_matched} ({item.amount_g:.0f} g{state_flag}{est_flag}): "
-                f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS "
-                f"(celkem {item.protein_raw:.1f} g) | Sacharidy: {item.carbs:.1f} g | "
-                f"Tuky: {item.fats:.1f} g"
-            )
-            total_kcal += item.calories
-            total_prot_usable += item.protein_usable
-            total_prot_raw += item.protein_raw
-            total_carbs += item.carbs
-            total_fats += item.fats
-
-        lines.append("---")
-        lines.append("Součet za den:")
-        lines.append(f"Energie: {total_kcal:.1f} kcal")
-        lines.append(f"Bílkoviny (využitelné DIAAS): {total_prot_usable:.1f} g")
-        lines.append(f"Bílkoviny (celkem): {total_prot_raw:.1f} g")
-        lines.append(f"Sacharidy: {total_carbs:.1f} g")
-        lines.append(f"Tuky: {total_fats:.1f} g")
-
-    if latest_weight:
-        time_part = latest_weight.logged_at[11:16] if len(latest_weight.logged_at) >= 16 else ""
-        time_info = f" (v {time_part})" if time_part else ""
-        lines.append(f"Tělesná hmotnost: {latest_weight.weight_kg:.1f} kg{time_info}")
-
-    return "\n".join(lines)
+from nutrition_agent.targets import (
+    calculate_daily_targets,
+    parse_day_type,
+    parse_goal,
+)
 
 
 def format_history(conn: sqlite3.Connection, limit: int = 10) -> str:
@@ -120,13 +75,62 @@ def handle_user_message(
     if not clean_input:
         return "Zadán prázdný vstup."
 
-    # Intercept built-in commands
     command_lower = clean_input.lower()
-    if command_lower in ("dnes", "prehled", "dnesek", "summary", "stats", "today"):
-        return format_daily_summary(conn)
+
+    # 1. State and Goal management commands
+    parts = clean_input.split(maxsplit=1)
+    first_token = parts[0].lower()
+    if first_token in ("cil", "cíl", "stav", "goal") and len(parts) > 1:
+        try:
+            goal = parse_goal(parts[1])
+        except ValueError as exc:
+            return str(exc)
+        set_user_setting(conn, "goal", goal.value)
+        _, day_type, weight = get_user_profile(conn)
+        targets = calculate_daily_targets(weight, goal, day_type)
+        return (
+            f"Aktivní cíl byl změněn na: {goal.value.upper()}.\n"
+            f"Přepočtené denní cíle ({weight:.1f} kg, {day_type.value}):\n"
+            f"Energie: {targets.calories:.0f} kcal | "
+            f"Bílkoviny: {targets.protein_usable:.1f} g DIAAS | "
+            f"Sacharidy: {targets.carbs:.1f} g | "
+            f"Tuky: {targets.fats:.1f} g"
+        )
+
+    if first_token in ("den", "day") and len(parts) > 1:
+        try:
+            day_type = parse_day_type(parts[1])
+        except ValueError as exc:
+            return str(exc)
+        set_user_setting(conn, "day_type", day_type.value)
+        goal, _, weight = get_user_profile(conn)
+        targets = calculate_daily_targets(weight, goal, day_type)
+        return (
+            f"Typ dne byl nastaven na: {day_type.value.upper()}.\n"
+            f"Aktuální denní cíle ({goal.value}, {weight:.1f} kg):\n"
+            f"Energie: {targets.calories:.0f} kcal | "
+            f"Bílkoviny: {targets.protein_usable:.1f} g DIAAS | "
+            f"Sacharidy: {targets.carbs:.1f} g | "
+            f"Tuky: {targets.fats:.1f} g"
+        )
+
+    # 2. Timeframe reporting commands
+    if command_lower in ("dnes", "prehled", "přehled", "dnesek", "summary", "today"):
+        return generate_period_report(conn, "denni")
+    if command_lower in ("tyden", "týden", "tydenni", "týdenní", "week"):
+        return generate_period_report(conn, "tydenni")
+    if command_lower in ("mesic", "měsíc", "mesicni", "měsíční", "month"):
+        return generate_period_report(conn, "mesicni")
+    if command_lower in ("pulrok", "půlrok", "pulrocni", "půlroční", "half_year"):
+        return generate_period_report(conn, "pulrocni")
+    if command_lower in ("rok", "rocni", "roční", "year"):
+        return generate_period_report(conn, "rocni")
+    if command_lower in ("vse", "vše", "kompletni", "kompletní", "all", "total"):
+        return generate_period_report(conn, "kompletni")
     if command_lower in ("historie", "history"):
         return format_history(conn)
 
+    # 3. LLM Parsing
     try:
         user_log = parse_fn(clean_input)
     except Exception as exc:
@@ -149,7 +153,16 @@ def handle_user_message(
             weight_kg=valid_weight,
         )
         save_weight_log(conn, weight_log)
-        return f"Zaznamenána tělesná hmotnost: {valid_weight:.1f} kg"
+
+        goal, day_type, _ = get_user_profile(conn)
+        new_targets = calculate_daily_targets(valid_weight, goal, day_type)
+        return (
+            f"Zaznamenána tělesná hmotnost: {valid_weight:.1f} kg\n"
+            f"Cílové hodnoty byly automaticky přepočteny pro novou hmotnost ({goal.value}, "
+            f"{day_type.value}): {new_targets.calories:.0f} kcal | "
+            f"{new_targets.protein_usable:.1f} g DIAAS bílkovin | "
+            f"{new_targets.carbs:.1f} g sacharidů | {new_targets.fats:.1f} g tuků."
+        )
 
     if user_log.log_type == "FOOD":
         if not user_log.items:
@@ -168,12 +181,6 @@ def handle_user_message(
         save_food_logs(conn, calculated_items)
 
         lines = ["Zaznamenáno jídlo:"]
-        total_kcal = 0.0
-        total_prot_raw = 0.0
-        total_prot_usable = 0.0
-        total_carbs = 0.0
-        total_fats = 0.0
-
         for item in calculated_items:
             est_flag = " (odhad)" if item.is_estimated else ""
             state_flag = f" ({item.state})" if item.state == "cooked" else ""
@@ -183,19 +190,19 @@ def handle_user_message(
                 f"(celkem {item.protein_raw:.1f} g) | Sacharidy: {item.carbs:.1f} g | "
                 f"Tuky: {item.fats:.1f} g"
             )
-            total_kcal += item.calories
-            total_prot_raw += item.protein_raw
-            total_prot_usable += item.protein_usable
-            total_carbs += item.carbs
-            total_fats += item.fats
+
+        today_prefix = datetime.now().strftime("%Y-%m-%d")
+        daily_foods = get_daily_food_logs(conn, today_prefix)
+        day_cal = sum(x.calories for x in daily_foods)
+        day_prot = sum(x.protein_usable for x in daily_foods)
+        day_carbs = sum(x.carbs for x in daily_foods)
+        day_fats = sum(x.fats for x in daily_foods)
+
+        goal, day_type, current_weight = get_user_profile(conn)
+        targets = calculate_daily_targets(current_weight, goal, day_type)
 
         lines.append("---")
-        lines.append(
-            f"Celkem: {total_kcal:.1f} kcal | "
-            f"Bílkoviny: {total_prot_usable:.1f} g DIAAS (celkem {total_prot_raw:.1f} g) | "
-            f"Sacharidy: {total_carbs:.1f} g | "
-            f"Tuky: {total_fats:.1f} g"
-        )
+        lines.append(format_daily_target_breakdown(day_cal, day_prot, day_carbs, day_fats, targets))
         return "\n".join(lines)
 
     return "Nerozpoznaný typ záznamu."
@@ -203,8 +210,18 @@ def handle_user_message(
 
 def run_interactive_loop(foods: list[FoodDefinition], conn: sqlite3.Connection) -> None:
     """Run interactive CLI chat loop."""
-    print("Nutrition Agent spuštěn. Zadejte záznam stravy nebo hmotnosti.")
-    print("Příkazy: 'dnes' pro denní přehled, 'historie' pro historii, 'konec' pro ukončení.")
+    goal, day_type, weight = get_user_profile(conn)
+    targets = calculate_daily_targets(weight, goal, day_type)
+
+    print("Nutrition Agent spuštěn.")
+    print(
+        f"Aktivní profil: {goal.value.upper()} | {day_type.value.upper()} | "
+        f"{weight:.1f} kg ({targets.calories:.0f} kcal)"
+    )
+    print("Příkazy: 'dnes', 'tyden', 'mesic', 'pulrok', 'rok', 'vse', 'historie'")
+    print("Správa cílů: 'cil [bulk|maintenance|cut]', 'den [trenink|odpocinek]'")
+    print("Zadejte jídlo, váhu nebo příkaz (konec pro ukončení):")
+
     while True:
         try:
             user_input = input("> ").strip()
@@ -237,6 +254,49 @@ def main() -> None:
         help="Zobrazit dnešní přehled stravy a hmotnosti",
     )
     parser.add_argument(
+        "--week",
+        "--tyden",
+        action="store_true",
+        help="Zobrazit týdenní souhrn (posledních 7 dní)",
+    )
+    parser.add_argument(
+        "--month",
+        "--mesic",
+        action="store_true",
+        help="Zobrazit měsíční souhrn (posledních 30 dní)",
+    )
+    parser.add_argument(
+        "--half-year",
+        "--pulrok",
+        action="store_true",
+        help="Zobrazit půlroční souhrn (posledních 180 dní)",
+    )
+    parser.add_argument(
+        "--year",
+        "--rok",
+        action="store_true",
+        help="Zobrazit roční souhrn (posledních 365 dní)",
+    )
+    parser.add_argument(
+        "--all",
+        "--vse",
+        "--kompletni",
+        action="store_true",
+        help="Zobrazit kompletní souhrn ze všech dat",
+    )
+    parser.add_argument(
+        "--goal",
+        "--cil",
+        type=str,
+        help="Nastavit aktivní nutriční cíl (lean_bulk, maintenance, cut)",
+    )
+    parser.add_argument(
+        "--day-type",
+        "--den",
+        type=str,
+        help="Nastavit typ dne (training, rest)",
+    )
+    parser.add_argument(
         "--history",
         "-H",
         nargs="?",
@@ -252,15 +312,35 @@ def main() -> None:
     foods = load_foods_from_json(settings.foods_data_path)
 
     try:
+        if args.goal:
+            goal = parse_goal(args.goal)
+            set_user_setting(conn, "goal", goal.value)
+            print(f"Aktivní cíl nastaven na: {goal.value}")
+
+        if args.day_type:
+            day_type = parse_day_type(args.day_type)
+            set_user_setting(conn, "day_type", day_type.value)
+            print(f"Typ dne nastaven na: {day_type.value}")
+
         if args.today:
-            print(format_daily_summary(conn))
+            print(generate_period_report(conn, "denni"))
+        elif args.week:
+            print(generate_period_report(conn, "tydenni"))
+        elif args.month:
+            print(generate_period_report(conn, "mesicni"))
+        elif args.half_year:
+            print(generate_period_report(conn, "pulrocni"))
+        elif args.year:
+            print(generate_period_report(conn, "rocni"))
+        elif args.all:
+            print(generate_period_report(conn, "kompletni"))
         elif args.history is not None:
             print(format_history(conn, limit=args.history))
         elif args.message:
             full_message = " ".join(args.message)
             response = handle_user_message(full_message, foods, conn)
             print(response)
-        else:
+        elif not args.goal and not args.day_type:
             run_interactive_loop(foods, conn)
     finally:
         conn.close()

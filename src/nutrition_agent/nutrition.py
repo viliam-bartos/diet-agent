@@ -49,6 +49,13 @@ FOOD_SYNONYMS: dict[str, str] = {
     "vločky": "ovesné vločky",
     "protein": "syrovátkový protein (80%)",
     "tvaroh": "tvaroh odtučněný",
+    "rýže": "rýže jasmínová (suchá)",
+    "čočka": "čočka hnědá (suchá)",
+    "cizrna": "cizrna (suchá)",
+    "těstoviny": "těstoviny semolinové",
+    "vejce": "vejce (celé)",
+    "olej": "olivový olej",
+    "tofu": "tofu bílé",
 }
 
 # Standard piece and measure weights in grams (vault.md section 2)
