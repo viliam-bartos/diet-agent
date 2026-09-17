@@ -1,0 +1,138 @@
+[
+  {
+    "name": "Kuřecí prsa",
+    "calories": 106.0,
+    "protein": 23.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.0,
+    "fats": 1.2
+  },
+  {
+    "name": "Hovězí zadní",
+    "calories": 133.0,
+    "protein": 21.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.0,
+    "fats": 5.5
+  },
+  {
+    "name": "Losos",
+    "calories": 208.0,
+    "protein": 20.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.0,
+    "fats": 13.0
+  },
+  {
+    "name": "Vejce (celé)",
+    "calories": 143.0,
+    "protein": 12.6,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.7,
+    "fats": 9.9
+  },
+  {
+    "name": "Tvaroh odtučněný",
+    "calories": 68.0,
+    "protein": 12.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 4.0,
+    "fats": 0.2
+  },
+  {
+    "name": "Syrovátkový protein (80%)",
+    "calories": 390.0,
+    "protein": 80.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 6.0,
+    "fats": 5.0
+  },
+  {
+    "name": "Tofu bílé",
+    "calories": 125.0,
+    "protein": 12.0,
+    "diaas_coefficient": 0.85,
+    "carbs": 2.3,
+    "fats": 7.5
+  },
+  {
+    "name": "Čočka hnědá (suchá)",
+    "calories": 353.0,
+    "protein": 24.0,
+    "diaas_coefficient": 0.75,
+    "carbs": 60.0,
+    "fats": 1.0
+  },
+  {
+    "name": "Cizrna (suchá)",
+    "calories": 364.0,
+    "protein": 19.0,
+    "diaas_coefficient": 0.75,
+    "carbs": 61.0,
+    "fats": 6.0
+  },
+  {
+    "name": "Rýže jasmínová (suchá)",
+    "calories": 355.0,
+    "protein": 7.0,
+    "diaas_coefficient": 0.70,
+    "carbs": 79.0,
+    "fats": 0.7
+  },
+  {
+    "name": "Ovesné vločky",
+    "calories": 370.0,
+    "protein": 13.5,
+    "diaas_coefficient": 0.70,
+    "carbs": 58.5,
+    "fats": 7.0
+  },
+  {
+    "name": "Těstoviny semolinové",
+    "calories": 350.0,
+    "protein": 12.0,
+    "diaas_coefficient": 0.70,
+    "carbs": 72.0,
+    "fats": 1.5
+  },
+  {
+    "name": "Brambory",
+    "calories": 77.0,
+    "protein": 2.0,
+    "diaas_coefficient": 0.80,
+    "carbs": 17.0,
+    "fats": 0.1
+  },
+  {
+    "name": "Banán",
+    "calories": 89.0,
+    "protein": 1.1,
+    "diaas_coefficient": 0.70,
+    "carbs": 23.0,
+    "fats": 0.3
+  },
+  {
+    "name": "Olivový olej",
+    "calories": 884.0,
+    "protein": 0.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.0,
+    "fats": 100.0
+  },
+  {
+    "name": "Arašídové máslo",
+    "calories": 588.0,
+    "protein": 25.0,
+    "diaas_coefficient": 0.65,
+    "carbs": 20.0,
+    "fats": 50.0
+  },
+  {
+    "name": "Jablko",
+    "calories": 52.0,
+    "protein": 0.3,
+    "diaas_coefficient": 0.70,
+    "carbs": 14.0,
+    "fats": 0.2
+  }
+]
