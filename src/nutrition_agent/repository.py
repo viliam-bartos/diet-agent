@@ -133,3 +133,73 @@ def get_recent_weight_logs(
         )
         for row in rows
     ]
+
+
+def get_daily_food_logs(
+    conn: sqlite3.Connection,
+    date_prefix: str,
+) -> list[CalculatedFoodLog]:
+    """Fetch food logs for a given day (date_prefix in ISO 8601, e.g. 'YYYY-MM-DD')."""
+    sql = """
+    SELECT id, logged_at, raw_input, food_name_matched, amount_g,
+           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats
+    FROM food_logs
+    WHERE logged_at LIKE ? || '%'
+    ORDER BY logged_at ASC
+    """
+    cursor = conn.cursor()
+    cursor.execute(sql, (date_prefix,))
+    rows = cursor.fetchall()
+    return [
+        CalculatedFoodLog(
+            id=row["id"],
+            logged_at=row["logged_at"],
+            raw_input=row["raw_input"],
+            food_name_matched=row["food_name_matched"],
+            amount_g=row["amount_g"],
+            state=row["state"],
+            is_estimated=bool(row["is_estimated"]),
+            calories=row["calories"],
+            protein_raw=row["protein_raw"],
+            protein_usable=row["protein_usable"],
+            carbs=row["carbs"],
+            fats=row["fats"],
+        )
+        for row in rows
+    ]
+
+
+def get_latest_weight_log(
+    conn: sqlite3.Connection,
+    date_prefix: str | None = None,
+) -> CalculatedWeightLog | None:
+    """Fetch the latest weight log, optionally filtered by date_prefix."""
+    cursor = conn.cursor()
+    if date_prefix:
+        sql = """
+        SELECT id, logged_at, raw_input, weight_kg
+        FROM weight_logs
+        WHERE logged_at LIKE ? || '%'
+        ORDER BY logged_at DESC
+        LIMIT 1
+        """
+        cursor.execute(sql, (date_prefix,))
+    else:
+        sql = """
+        SELECT id, logged_at, raw_input, weight_kg
+        FROM weight_logs
+        ORDER BY logged_at DESC
+        LIMIT 1
+        """
+        cursor.execute(sql)
+
+    row = cursor.fetchone()
+    if row is None:
+        return None
+
+    return CalculatedWeightLog(
+        id=row["id"],
+        logged_at=row["logged_at"],
+        raw_input=row["raw_input"],
+        weight_kg=row["weight_kg"],
+    )

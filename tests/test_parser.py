@@ -86,3 +86,21 @@ def test_food_matching_recognized_synonyms_and_items():
     food, score = find_matching_food("jasmínová rýže", foods)
     assert food.name == "Rýže jasmínová (suchá)"
     assert score >= 75.0
+
+
+def test_extracted_food_item_positive_amount_validation():
+    """Amount <= 0 fails fast with ValueError."""
+    with pytest.raises(ValueError, match="Množství suroviny musí být kladné číslo"):
+        ExtractedFoodItem(name="rýže", amount=0.0)
+
+    with pytest.raises(ValueError, match="Množství suroviny musí být kladné číslo"):
+        ExtractedFoodItem(name="rýže", amount=-50.0)
+
+
+def test_google_genai_schema_compatibility():
+    """Verify that UserLog schema is accepted by google-genai without exclusiveMinimum."""
+    from google.genai._transformers import t_schema
+    from google.genai.types import Schema
+
+    schema = t_schema(None, UserLog)
+    assert isinstance(schema, Schema)

@@ -78,15 +78,36 @@ Příklady vstupů:
 - `Dneska k obědu 200g kuřecích prsou a 150g rýže`
 - `Váha 82.4 kg`
 - `2 vejce a 1 banán`
+- `dnes` nebo `prehled` pro zobrazení denního souhrnu stravy a tělesné hmotnosti
+- `historie` pro zobrazení posledních záznamů
 
 Ukončení interaktivního režimu zadáním `konec`, `exit` nebo `quit`.
 
-### Jednorázový záznam
+### Jednorázový záznam a přepínače
 
 Zprávu lze předat přímo jako argument:
 ```bash
 nutrition-agent "150g hovězího a 200g brambor"
 ```
+
+Zobrazení denního souhrnu:
+```bash
+nutrition-agent --today
+```
+
+Zobrazení historie posledních N záznamů:
+```bash
+nutrition-agent --history 10
+```
+
+---
+
+## Přepočet tepelné úpravy (raw vs cooked)
+
+Katalog potravin `data/foods.json` uvádí nutriční hodnoty v syrovém / suchém stavu. Systém automaticky zohledňuje tepelnou úpravu (`state='cooked'`):
+- **Maso a ryby**: ztráta vody (úsušek ~20–25 %), přepočet koeficientem 1.20–1.30 na ekvivalent syrového masa.
+- **Obiloviny, rýže, těstoviny a luštěniny**: absorpce vody (2.3–2.5× nárůst hmotnosti), přepočet koeficientem 0.35–0.43 na ekvivalent suché suroviny.
+- **Brambory, vejce, ovoce**: výchozí poměr 1.00.
 
 ---
 

@@ -69,7 +69,6 @@ class ExtractedFoodItem(BaseModel):
     )
     amount: float = Field(
         ...,
-        gt=0,
         description="Numerické množství suroviny v gramech, ml nebo kusech",
     )
     unit: Literal["g", "ml", "ks", "porce"] = Field(
@@ -84,6 +83,14 @@ class ExtractedFoodItem(BaseModel):
         default=False,
         description="True, pokud gramáž nebyla v textu explicitně uvedena číslem",
     )
+
+    @field_validator("amount")
+    @classmethod
+    def validate_positive_amount(cls, value: float) -> float:
+        """Validate amount is strictly positive (Fail Fast)."""
+        if value <= 0:
+            raise ValueError("Množství suroviny musí být kladné číslo větší než 0.")
+        return value
 
 
 class UserLog(BaseModel):

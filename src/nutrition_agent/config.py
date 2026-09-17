@@ -18,11 +18,18 @@ class Settings:
     log_level: str
     gemini_api_key: str | None
 
+    @property
+    def foods_db_path(self) -> Path:
+        """Alias for foods_data_path."""
+        return self.foods_data_path
+
     @classmethod
     def load(cls) -> "Settings":
         """Load settings from environment with default fallbacks."""
         db_path_str = os.getenv("DATABASE_PATH", "data/nutrition.db")
-        foods_path_str = os.getenv("FOODS_DATA_PATH", "data/foods.json")
+        foods_path_str = os.getenv("FOODS_DB_PATH") or os.getenv(
+            "FOODS_DATA_PATH", "data/foods.json"
+        )
         log_level = os.getenv("LOG_LEVEL", "INFO")
         gemini_api_key = os.getenv("GEMINI_API_KEY")
 

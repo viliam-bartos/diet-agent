@@ -62,6 +62,34 @@ STANDARD_UNIT_WEIGHTS_GRAMS: dict[str, float] = {
     "odměrka proteinu": 30.0,
 }
 
+# Cooking conversion ratios: multiplier from cooked weight to raw equivalent weight.
+# Meat/fish lose ~20-25% water (yield ~0.75-0.80), so 100g cooked = ~1.25g raw.
+# Grains/legumes absorb water (yield ~2.3-2.5x), so 100g cooked = ~0.40g dry.
+COOKED_TO_RAW_RATIOS: dict[str, float] = {
+    "kuřecí prsa": 1.25,
+    "hovězí zadní": 1.30,
+    "losos": 1.20,
+    "rýže jasmínová (suchá)": 0.40,
+    "těstoviny semolinové": 0.43,
+    "ovesné vločky": 0.35,
+    "čočka hnědá (suchá)": 0.43,
+    "cizrna (suchá)": 0.43,
+    "brambory": 1.00,
+    "tofu bílé": 1.00,
+    "vejce (celé)": 1.00,
+    "jablko": 1.00,
+    "banán": 1.00,
+}
+
+
+def get_cooked_to_raw_ratio(food_name: str) -> float:
+    """Return conversion ratio from cooked weight to raw equivalent weight."""
+    normalized = food_name.strip().lower()
+    for key, ratio in COOKED_TO_RAW_RATIOS.items():
+        if key in normalized or normalized in key:
+            return ratio
+    return 1.0
+
 
 def get_coefficient_for_category(category: ProteinCategory | str) -> float:
     """Return DIAAS coefficient for a given protein category.
@@ -205,9 +233,20 @@ def calculate_food_log(
     food_def: FoodDefinition,
     raw_input: str,
 ) -> CalculatedFoodLog:
-    """Calculate scaled macronutrients, calories, and DIAAS protein for an item."""
+    """Calculate scaled macronutrients, calories, and DIAAS protein for an item.
+
+    Converts cooked foods to their raw-equivalent weight when computing nutrition
+    against the raw food database.
+    """
     amount_g = convert_to_grams(food_def.name, item.amount, item.unit)
-    multiplier = amount_g / 100.0
+
+    if item.state == "cooked":
+        ratio = get_cooked_to_raw_ratio(food_def.name)
+        raw_equivalent_g = amount_g * ratio
+    else:
+        raw_equivalent_g = amount_g
+
+    multiplier = raw_equivalent_g / 100.0
 
     calories = round(food_def.calories * multiplier, 1)
     protein_raw = round(food_def.protein * multiplier, 2)

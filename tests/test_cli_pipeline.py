@@ -131,3 +131,55 @@ def test_handle_unknown_food_fails_cleanly(
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM food_logs")
     assert cursor.fetchone()[0] == 0
+
+
+def test_handle_command_dnes_and_prehled(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """Keyword 'dnes' or 'prehled' outputs daily summary without invoking parser."""
+    conn, foods = test_setup
+
+    # Empty day first
+    result_empty = handle_user_message("dnes", foods, conn)
+    assert "Denní přehled" in result_empty or "nejsou evidovány žádné záznamy" in result_empty
+
+    # Log an item
+    def mock_parser(msg: str) -> UserLog:
+        return UserLog(
+            log_type="FOOD",
+            items=[
+                ExtractedFoodItem(
+                    name="kuřecí prsa",
+                    amount=200.0,
+                    unit="g",
+                    state="raw",
+                )
+            ],
+        )
+
+    handle_user_message("200g kuřecí prsa", foods, conn, parse_fn=mock_parser)
+
+    result_after = handle_user_message("prehled", foods, conn)
+    assert "Denní přehled" in result_after
+    assert "Kuřecí prsa" in result_after
+    assert "Součet za den:" in result_after
+    assert "Energie: 212.0 kcal" in result_after
+
+
+def test_handle_command_historie(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """Keyword 'historie' returns list of recent food and weight logs."""
+    conn, foods = test_setup
+
+    result_empty = handle_user_message("historie", foods, conn)
+    assert "Historie je prázdná" in result_empty
+
+    def mock_weight(msg: str) -> UserLog:
+        return UserLog(log_type="WEIGHT", weight_kg=83.0)
+
+    handle_user_message("83 kg", foods, conn, parse_fn=mock_weight)
+
+    result_after = handle_user_message("history", foods, conn)
+    assert "Historie záznamů:" in result_after
+    assert "83.0 kg" in result_after

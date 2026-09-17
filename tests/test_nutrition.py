@@ -61,3 +61,44 @@ def test_calculate_usable_protein_negative_inputs():
 
     with pytest.raises(ValueError, match="DIAAS coefficient cannot be negative"):
         calculate_usable_protein(20.0, -0.5)
+
+
+def test_cooked_to_raw_ratio_lookup():
+    """Verify cooking yield ratios for meat (water loss) and grains (water absorption)."""
+    from nutrition_agent.nutrition import get_cooked_to_raw_ratio
+
+    # Chicken loses water, raw equivalent is higher
+    assert get_cooked_to_raw_ratio("Kuřecí prsa") == 1.25
+    # Rice absorbs water, raw equivalent is lower
+    assert get_cooked_to_raw_ratio("Rýže jasmínová (suchá)") == 0.40
+    # Unknown item defaults to 1.0
+    assert get_cooked_to_raw_ratio("Neznámá surovina") == 1.00
+
+
+def test_calculate_food_log_cooked_state_adjustment():
+    """Verify cooked foods are scaled through raw equivalent weight."""
+    from nutrition_agent.models import ExtractedFoodItem, FoodDefinition
+    from nutrition_agent.nutrition import calculate_food_log
+
+    rice_def = FoodDefinition(
+        name="Rýže jasmínová (suchá)",
+        calories=355.0,
+        protein=7.0,
+        diaas_coefficient=0.70,
+        carbs=79.0,
+        fats=0.7,
+    )
+
+    # 150g raw rice: multiplier = 1.5 -> 355 * 1.5 = 532.5 kcal
+    raw_item = ExtractedFoodItem(name="rýže", amount=150.0, unit="g", state="raw")
+    raw_log = calculate_food_log(raw_item, rice_def, "150g suché rýže")
+    assert raw_log.calories == 532.5
+    assert raw_log.protein_raw == 10.5
+
+    # 150g cooked rice: 150 * 0.40 = 60g raw equivalent -> 355 * 0.6 = 213.0 kcal
+    cooked_item = ExtractedFoodItem(name="rýže", amount=150.0, unit="g", state="cooked")
+    cooked_log = calculate_food_log(cooked_item, rice_def, "150g vařené rýže")
+    assert cooked_log.calories == 213.0
+    assert cooked_log.protein_raw == 4.2
+    assert cooked_log.state == "cooked"
+    assert cooked_log.amount_g == 150.0
