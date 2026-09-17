@@ -7,6 +7,13 @@ import pytest
 from nutrition_agent.cli import handle_user_message
 from nutrition_agent.db import SCHEMA_SQL, get_connection
 from nutrition_agent.models import ExtractedFoodItem, FoodDefinition, UserLog
+from nutrition_agent.repository import (
+    get_user_profile,
+    get_user_setting,
+    get_workout_logs_in_range,
+    set_user_setting,
+)
+from nutrition_agent.targets import DayType
 
 
 @pytest.fixture
@@ -184,3 +191,83 @@ def test_handle_command_historie(
     result_after = handle_user_message("history", foods, conn)
     assert "Historie záznamů:" in result_after
     assert "83.0 kg" in result_after
+
+
+def test_handle_workout_command_with_duration(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """'trenink' command logs a workout and switches the day to TRAINING."""
+    conn, foods = test_setup
+
+    # Start from a rest day so the automatic switch is observable
+    set_user_setting(conn, "day_type", DayType.REST.value)
+
+    result = handle_user_message("trenink nohy 60 min", foods, conn)
+    assert "Zaznamenán trénink: nohy" in result
+    assert "60 min" in result
+    assert "TRAINING" in result
+
+    logs = get_workout_logs_in_range(conn)
+    assert len(logs) == 1
+    assert logs[0].workout_type == "nohy"
+    assert logs[0].duration_minutes == 60
+    assert logs[0].raw_input == "trenink nohy 60 min"
+
+    assert get_user_setting(conn, "day_type") == DayType.TRAINING.value
+
+
+def test_handle_workout_command_without_duration(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """'trenink' without a duration stores a NULL duration and a default type."""
+    conn, foods = test_setup
+
+    result = handle_user_message("trenink", foods, conn)
+    assert "Zaznamenán trénink" in result
+
+    logs = get_workout_logs_in_range(conn)
+    assert len(logs) == 1
+    assert logs[0].duration_minutes is None
+    assert logs[0].workout_type == "Silový trénink"
+
+
+def test_handle_goal_and_day_type_switching(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """'cil' and 'den' commands persist the profile and recompute targets."""
+    conn, foods = test_setup
+
+    result_goal = handle_user_message("cil cut", foods, conn)
+    assert "CUT" in result_goal
+    assert "kcal" in result_goal
+
+    result_day = handle_user_message("den odpocinek", foods, conn)
+    assert "REST" in result_day
+
+    goal, day_type, weight = get_user_profile(conn)
+    assert goal.value == "cut"
+    assert day_type.value == "rest"
+    assert weight == 83.0
+
+    # Invalid values return the parser error string instead of raising
+    assert "Neznámý cíl" in handle_user_message("cil nesmysl", foods, conn)
+    assert "Neznámý typ dne" in handle_user_message("den nesmysl", foods, conn)
+
+
+def test_handle_weight_log_recomputes_targets(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """Logging a new weight reports automatically recomputed targets."""
+    conn, foods = test_setup
+
+    def mock_weight(msg: str) -> UserLog:
+        return UserLog(log_type="WEIGHT", weight_kg=90.0)
+
+    result = handle_user_message("90 kg", foods, conn, parse_fn=mock_weight)
+    assert "Zaznamenána tělesná hmotnost: 90.0 kg" in result
+    assert "přepočteny" in result
+
+    # Both meals and the daily report must now use the 90 kg targets
+    report = handle_user_message("dnes", foods, conn)
+    assert "90.0 kg" in report
+    assert "3415" in report  # 90 kg * (3150 / 83) rounded

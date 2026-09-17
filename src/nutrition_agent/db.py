@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS user_settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS workout_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    logged_at TEXT NOT NULL,
+    raw_input TEXT NOT NULL,
+    workout_type TEXT NOT NULL,
+    duration_minutes INTEGER,
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_workout_logs_logged_at ON workout_logs(logged_at);
 """
 
 

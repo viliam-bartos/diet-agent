@@ -216,3 +216,16 @@ class CalculatedWeightLog(BaseModel):
     logged_at: str = Field(default_factory=utc_now_iso)
     raw_input: str
     weight_kg: float
+
+
+class CalculatedWorkoutLog(BaseModel):
+    """Processed workout log ready for SQLite persistence."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: int | None = None
+    logged_at: str = Field(default_factory=utc_now_iso)
+    raw_input: str
+    workout_type: str = "Silový trénink"
+    duration_minutes: int | None = None
+    notes: str | None = None

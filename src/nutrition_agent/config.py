@@ -17,6 +17,11 @@ class Settings:
     foods_data_path: Path
     log_level: str
     gemini_api_key: str | None
+    discord_bot_token: str | None = None
+    web_host: str = "127.0.0.1"
+    web_port: int = 8000
+    target_calories: float | None = None
+    target_protein_g: float | None = None
 
     @property
     def foods_db_path(self) -> Path:
@@ -32,12 +37,26 @@ class Settings:
         )
         log_level = os.getenv("LOG_LEVEL", "INFO")
         gemini_api_key = os.getenv("GEMINI_API_KEY")
+        discord_bot_token = os.getenv("DISCORD_BOT_TOKEN")
+        web_host = os.getenv("WEB_HOST", "127.0.0.1")
+        web_port = int(os.getenv("WEB_PORT", "8000"))
+
+        target_cals_raw = os.getenv("TARGET_CALORIES")
+        target_calories = float(target_cals_raw) if target_cals_raw else None
+
+        target_prot_raw = os.getenv("TARGET_PROTEIN_G")
+        target_protein_g = float(target_prot_raw) if target_prot_raw else None
 
         return cls(
             database_path=Path(db_path_str),
             foods_data_path=Path(foods_path_str),
             log_level=log_level.upper(),
             gemini_api_key=gemini_api_key,
+            discord_bot_token=discord_bot_token,
+            web_host=web_host,
+            web_port=web_port,
+            target_calories=target_calories,
+            target_protein_g=target_protein_g,
         )
 
     def require_gemini_api_key(self) -> str:
@@ -47,6 +66,14 @@ class Settings:
                 "Nenalezen API klíč pro Gemini. Nastavte proměnnou prostředí GEMINI_API_KEY."
             )
         return self.gemini_api_key.strip()
+
+    def require_discord_token(self) -> str:
+        """Return DISCORD_BOT_TOKEN or fail fast if not set."""
+        if not self.discord_bot_token or not self.discord_bot_token.strip():
+            raise ValueError(
+                "Nenalezen token pro Discord bota. Nastavte proměnnou prostředí DISCORD_BOT_TOKEN."
+            )
+        return self.discord_bot_token.strip()
 
 
 settings = Settings.load()

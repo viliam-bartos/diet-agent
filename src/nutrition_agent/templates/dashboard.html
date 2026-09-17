@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nutrition Agent // Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-paper: #F4EFE6;
+      --bg-cardboard: #E3D8C4;
+      --bg-cardboard-dark: #D4C6AE;
+      --bg-sheet: #FAF8F5;
+
+      --ink-primary: #18181A;
+      --ink-secondary: #5C5E66;
+      --ink-muted: #8E9099;
+      --border-technical: 1.5px solid #18181A;
+      --border-subtle: 1px solid rgba(24, 24, 26, 0.18);
+
+      --valve-orange: #F05A22;
+      --valve-orange-glow: rgba(240, 90, 34, 0.15);
+      --aperture-cyan: #00A3E0;
+      --aperture-cyan-glow: rgba(0, 163, 224, 0.15);
+      --terminal-amber: #D98200;
+
+      --font-display: 'Barlow Semi Condensed', -apple-system, sans-serif;
+      --font-mono: 'Space Mono', 'JetBrains Mono', Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg-paper);
+      color: var(--ink-primary);
+      font-family: var(--font-display);
+      background-image: radial-gradient(rgba(24, 24, 26, 0.04) 1px, transparent 0);
+      background-size: 24px 24px;
+      min-height: 100vh;
+      padding: 24px 16px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: var(--border-technical);
+      margin-bottom: 24px;
+    }
+
+    .brand-title {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .brand-subtitle {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-secondary);
+      letter-spacing: 0.5px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: var(--bg-sheet);
+      border: var(--border-technical);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--valve-orange);
+      border-radius: 50%;
+    }
+
+    /* Quick log bar */
+    .quick-input-card {
+      background: var(--bg-sheet);
+      border: var(--border-technical);
+      padding: 16px;
+      margin-bottom: 24px;
+      box-shadow: 3px 3px 0px rgba(24, 24, 26, 0.8);
+    }
+
+    .quick-input-form {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .quick-input-form input {
+      flex: 1;
+      min-width: 260px;
+      padding: 10px 14px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      background: var(--bg-paper);
+      border: var(--border-subtle);
+      color: var(--ink-primary);
+    }
+
+    .quick-input-form input:focus {
+      outline: none;
+      border: var(--border-technical);
+    }
+
+    button, .btn {
+      padding: 10px 18px;
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      background: var(--bg-cardboard);
+      border: var(--border-technical);
+      color: var(--ink-primary);
+      cursor: pointer;
+      transition: all 0.1s ease-in-out;
+    }
+
+    button:hover, .btn:hover {
+      background: var(--bg-cardboard-dark);
+      transform: translate(-1px, -1px);
+      box-shadow: 2px 2px 0px var(--ink-primary);
+    }
+
+    .btn-primary {
+      background: var(--valve-orange);
+      color: #fff;
+    }
+
+    .btn-primary:hover {
+      background: #d84c17;
+    }
+
+    .feedback-msg {
+      margin-top: 10px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      display: none;
+    }
+
+    /* Timeframe selector */
+    .timeframe-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+
+    .timeframe-btn {
+      padding: 6px 14px;
+      font-size: 13px;
+      font-family: var(--font-mono);
+    }
+
+    .timeframe-btn.active {
+      background: var(--ink-primary);
+      color: var(--bg-paper);
+      border-color: var(--ink-primary);
+    }
+
+    /* KPI Cards */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .kpi-card {
+      background: var(--bg-sheet);
+      border: var(--border-technical);
+      padding: 18px;
+      box-shadow: 3px 3px 0px rgba(24, 24, 26, 0.8);
+      position: relative;
+    }
+
+    .kpi-label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--ink-secondary);
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .kpi-value {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+
+    .kpi-unit {
+      font-size: 16px;
+      font-weight: 400;
+      color: var(--ink-secondary);
+    }
+
+    .kpi-subtext {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-secondary);
+    }
+
+    .kpi-subtext.positive { color: #1e7e34; }
+    .kpi-subtext.negative { color: #b21f2d; }
+
+    /* Section layout */
+    .dashboard-section {
+      background: var(--bg-sheet);
+      border: var(--border-technical);
+      padding: 22px;
+      margin-bottom: 28px;
+      box-shadow: 4px 4px 0px rgba(24, 24, 26, 0.8);
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 10px;
+      border-bottom: var(--border-subtle);
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    /* Heatmap */
+    .heatmap-container {
+      overflow-x: auto;
+      padding-bottom: 8px;
+    }
+
+    .heatmap-legend {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-secondary);
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .legend-box {
+      width: 12px;
+      height: 12px;
+      border: 1px solid rgba(24, 24, 26, 0.3);
+    }
+
+    .heatmap-grid {
+      display: flex;
+      gap: 4px;
+    }
+
+    .heatmap-column {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .heatmap-cell {
+      width: 14px;
+      height: 14px;
+      background: var(--bg-cardboard);
+      border: 1px solid rgba(24, 24, 26, 0.12);
+      border-radius: 2px;
+      position: relative;
+      cursor: pointer;
+    }
+
+    .heatmap-cell.level-empty { background: #E6DFC5; }
+    .heatmap-cell.level-green { background: #38A169; border-color: #2F855A; }
+    .heatmap-cell.level-blue { background: #3182CE; border-color: #2B6CB0; }
+    .heatmap-cell.level-amber { background: #DD6B20; border-color: #C05621; }
+    .heatmap-cell.has-workout::after {
+      content: '';
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      background: #FFFFFF;
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    /* Table styles */
+    .table-controls {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+
+    .filter-buttons {
+      display: flex;
+      gap: 6px;
+    }
+
+    .filter-btn {
+      padding: 4px 10px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+
+    .filter-btn.active {
+      background: var(--ink-primary);
+      color: var(--bg-paper);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th {
+      text-align: left;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 10px;
+      background: var(--bg-cardboard);
+      border-bottom: var(--border-technical);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    td {
+      padding: 10px;
+      border-bottom: var(--border-subtle);
+      vertical-align: top;
+    }
+
+    tr:hover td {
+      background: rgba(240, 90, 34, 0.04);
+    }
+
+    .tag-badge {
+      display: inline-block;
+      padding: 2px 6px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      border: 1px solid var(--ink-primary);
+    }
+
+    .tag-food { background: #EBF8FF; color: #2B6CB0; border-color: #2B6CB0; }
+    .tag-weight { background: #FEFCBF; color: #B7791F; border-color: #B7791F; }
+    .tag-workout { background: #FEEBC8; color: #C05621; border-color: #C05621; }
+
+    .pagination {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .pagination button {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <div class="brand-title">Nutrition Agent // Core</div>
+        <div class="brand-subtitle">DIAAS Usable Protein & Energy Telemetry</div>
+      </div>
+      <div class="status-badge">
+        <span class="badge-dot"></span>
+        <span id="activeGoalDisplay">LEAN_BULK // TRAINING</span>
+      </div>
+    </header>
+
+    <!-- Quick Message Entry -->
+    <div class="quick-input-card">
+      <form id="logForm" class="quick-input-form" onsubmit="submitLog(event)">
+        <input type="text" id="logMessage" placeholder="Zadejte jídlo, váhu nebo trénink (např. '150g hovězí', 'Váha 83.4 kg', 'Trénink nohy 60 min')..." required>
+        <button type="submit" class="btn btn-primary">Zapsat záznam</button>
+      </form>
+      <div id="feedbackMsg" class="feedback-msg"></div>
+    </div>
+
+    <!-- Timeframe Toggles -->
+    <div class="timeframe-bar">
+      <button class="timeframe-btn" onclick="setTimeframe('7d')">7 dní</button>
+      <button class="timeframe-btn active" onclick="setTimeframe('30d')">30 dní</button>
+      <button class="timeframe-btn" onclick="setTimeframe('90d')">3 měsíce</button>
+      <button class="timeframe-btn" onclick="setTimeframe('180d')">6 měsíců</button>
+      <button class="timeframe-btn" onclick="setTimeframe('365d')">1 rok</button>
+      <button class="timeframe-btn" onclick="setTimeframe('all')">Vše</button>
+    </div>
+
+    <!-- KPI Cards -->
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Aktuální tělesná váha</div>
+        <div class="kpi-value"><span id="kpiWeight">--</span> <span class="kpi-unit">kg</span></div>
+        <div class="kpi-subtext" id="kpiWeightDelta">-- za zvolené období</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Průměrné kalorie / den</div>
+        <div class="kpi-value"><span id="kpiCals">--</span> <span class="kpi-unit">kcal</span></div>
+        <div class="kpi-subtext" id="kpiCalsTarget">Cíl: -- kcal</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Průměrné DIAAS bílkoviny</div>
+        <div class="kpi-value"><span id="kpiProtein">--</span> <span class="kpi-unit">g</span></div>
+        <div class="kpi-subtext" id="kpiProteinTarget">Cíl: -- g DIAAS</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Odtrénované dny</div>
+        <div class="kpi-value"><span id="kpiWorkouts">--</span> <span class="kpi-unit">dní</span></div>
+        <div class="kpi-subtext" id="kpiDaysTotal">Z celkem -- dní stravy</div>
+      </div>
+    </div>
+
+    <!-- Weight Trend Chart -->
+    <div class="dashboard-section">
+      <div class="section-header">
+        <div class="section-title">Vývoj tělesné hmotnosti & 7denní klouzavý průměr</div>
+        <div class="brand-subtitle">Body jednotlivých vážení + hladký trend</div>
+      </div>
+      <div style="height: 320px; width: 100%;">
+        <canvas id="weightChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Calendar Heatmap -->
+    <div class="dashboard-section">
+      <div class="section-header">
+        <div class="section-title">Adherence kalendář & tréninky</div>
+        <div class="brand-subtitle">GitHub-style matice plnění nutričních cílů</div>
+      </div>
+      <div class="heatmap-container">
+        <div id="heatmapGrid" class="heatmap-grid"></div>
+      </div>
+      <div class="heatmap-legend">
+        <div class="legend-item"><div class="legend-box level-green"></div> Splněné kalorie i bílkoviny</div>
+        <div class="legend-item"><div class="legend-box level-blue"></div> Splněné bílkoviny</div>
+        <div class="legend-item"><div class="legend-box level-amber"></div> Záznam pod cílem</div>
+        <div class="legend-item"><div class="legend-box level-empty"></div> Bez záznamu</div>
+        <div class="legend-item"><div class="legend-box" style="background:#FFF; position:relative;"><div style="width:4px;height:4px;background:#18181A;border-radius:50%;margin:3px auto;"></div></div> Bílý bod = Tréninkový den</div>
+      </div>
+    </div>
+
+    <!-- Detailed Records Table -->
+    <div class="dashboard-section">
+      <div class="section-header">
+        <div class="section-title">Podrobný přehled záznamů</div>
+        <div class="table-controls">
+          <div class="filter-buttons">
+            <button class="filter-btn active" onclick="setFilter('all')">Vše</button>
+            <button class="filter-btn" onclick="setFilter('food')">Jídla</button>
+            <button class="filter-btn" onclick="setFilter('weight')">Váha</button>
+            <button class="filter-btn" onclick="setFilter('workout')">Trénink</button>
+          </div>
+        </div>
+      </div>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 140px;">Čas</th>
+              <th style="width: 90px;">Typ</th>
+              <th>Položka / Název</th>
+              <th>Detaily / Nutrienty</th>
+              <th>Původní text</th>
+            </tr>
+          </thead>
+          <tbody id="recordsBody">
+            <tr><td colspan="5" style="text-align: center; color: var(--ink-muted);">Načítám data...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination">
+        <button id="prevPageBtn" onclick="changePage(-1)" disabled>Předchozí</button>
+        <span id="pageInfo" style="font-family: var(--font-mono); font-size: 13px; align-self: center;">Strana 1</span>
+        <button id="nextPageBtn" onclick="changePage(1)">Další</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentTimeframe = '30d';
+    let currentFilter = 'all';
+    let currentPage = 1;
+    const pageSize = 15;
+    let weightChartInstance = null;
+
+    async function fetchData() {
+      await Promise.all([loadKpis(), loadWeightTrend(), loadHeatmap(), loadRecords()]);
+    }
+
+    function setTimeframe(tf) {
+      currentTimeframe = tf;
+      document.querySelectorAll('.timeframe-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.includes(tf) || (tf === '7d' && btn.textContent.includes('7')) || (tf === '30d' && btn.textContent.includes('30')) || (tf === '90d' && btn.textContent.includes('3 m')) || (tf === '180d' && btn.textContent.includes('6 m')) || (tf === '365d' && btn.textContent.includes('1 rok')) || (tf === 'all' && btn.textContent.includes('Vše')));
+      });
+      fetchData();
+    }
+
+    function setFilter(flt) {
+      currentFilter = flt;
+      currentPage = 1;
+      document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('onclick').includes(flt));
+      });
+      loadRecords();
+    }
+
+    async function loadKpis() {
+      try {
+        const res = await fetch(`/api/kpis?period=${currentTimeframe}`);
+        const data = await res.json();
+
+        document.getElementById('activeGoalDisplay').textContent = `${data.goal.toUpperCase()} // ${data.day_type.toUpperCase()}`;
+        document.getElementById('kpiWeight').textContent = data.current_weight != null ? data.current_weight.toFixed(1) : '--';
+
+        const deltaEl = document.getElementById('kpiWeightDelta');
+        if (data.weight_delta != null) {
+          const sign = data.weight_delta >= 0 ? '+' : '';
+          deltaEl.textContent = `${sign}${data.weight_delta.toFixed(1)} kg za období`;
+          deltaEl.className = 'kpi-subtext ' + (data.weight_delta >= 0 ? 'positive' : 'negative');
+        } else {
+          deltaEl.textContent = 'Žádná delta váhy';
+          deltaEl.className = 'kpi-subtext';
+        }
+
+        document.getElementById('kpiCals').textContent = data.avg_calories != null ? Math.round(data.avg_calories) : '--';
+        document.getElementById('kpiCalsTarget').textContent = `Cíl: ${Math.round(data.target_calories)} kcal`;
+
+        document.getElementById('kpiProtein').textContent = data.avg_protein_diaas != null ? data.avg_protein_diaas.toFixed(1) : '--';
+        document.getElementById('kpiProteinTarget').textContent = `Cíl: ${data.target_protein.toFixed(1)} g DIAAS`;
+
+        document.getElementById('kpiWorkouts').textContent = data.total_workout_days;
+        document.getElementById('kpiDaysTotal').textContent = `Z celkem ${data.total_food_days} dní se záznamem`;
+      } catch (err) {
+        console.error('Chyba při načítání KPI:', err);
+      }
+    }
+
+    async function loadWeightTrend() {
+      try {
+        const res = await fetch(`/api/weight-trend?period=${currentTimeframe}`);
+        const points = await res.json();
+
+        const labels = points.map(p => p.date);
+        const weights = points.map(p => p.weight_kg);
+        const movingAvgs = points.map(p => p.moving_avg_7d);
+
+        const ctx = document.getElementById('weightChart').getContext('2d');
+        if (weightChartInstance) {
+          weightChartInstance.destroy();
+        }
+
+        weightChartInstance = new Chart(ctx, {
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                type: 'scatter',
+                label: 'Naměřená váha (kg)',
+                data: points.map(p => ({ x: p.date, y: p.weight_kg })),
+                backgroundColor: '#18181A',
+                pointRadius: 4,
+                pointHoverRadius: 6,
+              },
+              {
+                type: 'line',
+                label: '7denní klouzavý průměr',
+                data: movingAvgs,
+                borderColor: '#F05A22',
+                backgroundColor: 'rgba(240, 90, 34, 0.08)',
+                borderWidth: 2.5,
+                fill: false,
+                tension: 0.35,
+                pointRadius: 0,
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+              x: {
+                grid: { color: 'rgba(24, 24, 26, 0.06)' },
+                ticks: { font: { family: 'Space Mono', size: 11 } }
+              },
+              y: {
+                grid: { color: 'rgba(24, 24, 26, 0.08)' },
+                ticks: { font: { family: 'Space Mono', size: 11 } }
+              }
+            },
+            plugins: {
+              legend: {
+                labels: { font: { family: 'Barlow Semi Condensed', size: 13 } }
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Chyba při načítání grafu váhy:', err);
+      }
+    }
+
+    async function loadHeatmap() {
+      try {
+        const res = await fetch(`/api/heatmap?period=${currentTimeframe}`);
+        const cells = await res.json();
+
+        const grid = document.getElementById('heatmapGrid');
+        grid.innerHTML = '';
+
+        if (!cells || cells.length === 0) {
+          grid.innerHTML = '<div style="font-family: var(--font-mono); font-size: 12px; color: var(--ink-muted);">Žádná data pro heatmapu v tomto období.</div>';
+          return;
+        }
+
+        let currentCol = document.createElement('div');
+        currentCol.className = 'heatmap-column';
+        grid.appendChild(currentCol);
+
+        cells.forEach((c, idx) => {
+          if (idx > 0 && c.weekday === 0) {
+            currentCol = document.createElement('div');
+            currentCol.className = 'heatmap-column';
+            grid.appendChild(currentCol);
+          }
+
+          const cellEl = document.createElement('div');
+          cellEl.className = `heatmap-cell level-${c.level} ${c.has_workout ? 'has-workout' : ''}`;
+          cellEl.title = `${c.date}\nEnergie: ${c.calories} kcal\nBílkoviny: ${c.protein_usable} g DIAAS${c.has_workout ? '\nTrénink: ' + c.workout_type : ''}`;
+          currentCol.appendChild(cellEl);
+        });
+      } catch (err) {
+        console.error('Chyba při načítání heatmapy:', err);
+      }
+    }
+
+    async function loadRecords() {
+      try {
+        const offset = (currentPage - 1) * pageSize;
+        const res = await fetch(`/api/records?type=${currentFilter}&limit=${pageSize}&offset=${offset}`);
+        const data = await res.json();
+
+        const tbody = document.getElementById('recordsBody');
+        tbody.innerHTML = '';
+
+        if (!data.items || data.items.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--ink-muted); font-family: var(--font-mono);">Nebyly nalezeny žádné záznamy.</td></tr>';
+          return;
+        }
+
+        data.items.forEach(r => {
+          const tr = document.createElement('tr');
+          const timeFormatted = r.logged_at ? r.logged_at.slice(0, 16).replace('T', ' ') : '';
+          tr.innerHTML = `
+            <td style="font-family: var(--font-mono); font-size: 12px;">${timeFormatted}</td>
+            <td><span class="tag-badge tag-${r.type}">${r.type}</span></td>
+            <td style="font-weight: 600;">${r.title}</td>
+            <td style="color: var(--ink-secondary); font-family: var(--font-mono); font-size: 12px;">${r.subtitle}</td>
+            <td style="color: var(--ink-muted); font-style: italic; font-size: 13px;">${r.raw_input || ''}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+        document.getElementById('pageInfo').textContent = `Strana ${currentPage} z ${Math.max(1, Math.ceil(data.total / pageSize))}`;
+        document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+        document.getElementById('nextPageBtn').disabled = offset + pageSize >= data.total;
+      } catch (err) {
+        console.error('Chyba při načítání záznamů:', err);
+      }
+    }
+
+    function changePage(delta) {
+      currentPage += delta;
+      loadRecords();
+    }
+
+    async function submitLog(e) {
+      e.preventDefault();
+      const input = document.getElementById('logMessage');
+      const val = input.value.trim();
+      if (!val) return;
+
+      const feedback = document.getElementById('feedbackMsg');
+      feedback.style.display = 'block';
+      feedback.style.color = 'var(--ink-secondary)';
+      feedback.textContent = 'Zpracovávám záznam...';
+
+      try {
+        const res = await fetch('/api/message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: val })
+        });
+        const result = await res.json();
+        feedback.style.color = '#1e7e34';
+        feedback.textContent = result.reply;
+        input.value = '';
+        fetchData();
+      } catch (err) {
+        feedback.style.color = '#b21f2d';
+        feedback.textContent = 'Chyba při odesílání: ' + err;
+      }
+    }
+
+    // Initial load
+    fetchData();
+  </script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 """Command line interface for Nutrition Agent."""
 
 import argparse
+import re
 import sqlite3
 from datetime import datetime
 
@@ -9,6 +10,7 @@ from nutrition_agent.db import get_connection, init_db
 from nutrition_agent.llm import parse_user_message
 from nutrition_agent.models import (
     CalculatedWeightLog,
+    CalculatedWorkoutLog,
     FoodDefinition,
     FoodNotFoundError,
     WeightValidationError,
@@ -27,9 +29,11 @@ from nutrition_agent.repository import (
     load_foods_from_json,
     save_food_logs,
     save_weight_log,
+    save_workout_log,
     set_user_setting,
 )
 from nutrition_agent.targets import (
+    DayType,
     calculate_daily_targets,
     parse_day_type,
     parse_goal,
@@ -112,6 +116,25 @@ def handle_user_message(
             f"Bílkoviny: {targets.protein_usable:.1f} g DIAAS | "
             f"Sacharidy: {targets.carbs:.1f} g | "
             f"Tuky: {targets.fats:.1f} g"
+        )
+
+    if first_token in ("trenink", "trénink", "workout"):
+        rest = parts[1].strip() if len(parts) > 1 else "Silový trénink"
+        dur_match = re.search(r"(\d+)\s*(?:min|m)?", rest)
+        dur = int(dur_match.group(1)) if dur_match else None
+        clean_desc = re.sub(r"\d+\s*(?:min|m)?", "", rest).strip() or "Silový trénink"
+
+        workout_log = CalculatedWorkoutLog(
+            raw_input=clean_input,
+            workout_type=clean_desc,
+            duration_minutes=dur,
+        )
+        save_workout_log(conn, workout_log)
+        set_user_setting(conn, "day_type", DayType.TRAINING.value)
+        dur_info = f" ({dur} min)" if dur else ""
+        return (
+            f"Zaznamenán trénink: {clean_desc}{dur_info}.\n"
+            "Typ dne byl automaticky nastaven na TRAINING."
         )
 
     # 2. Timeframe reporting commands
@@ -305,7 +328,56 @@ def main() -> None:
         default=None,
         help="Zobrazit posledních N záznamů (výchozí 10)",
     )
+    parser.add_argument(
+        "--web",
+        action="store_true",
+        help="Spustit webový dashboard server",
+    )
+    parser.add_argument(
+        "--bot",
+        action="store_true",
+        help="Spustit Discord bota",
+    )
+    parser.add_argument(
+        "--run-all",
+        action="store_true",
+        help="Spustit souběžně webový dashboard server i Discord bota",
+    )
     args = parser.parse_args()
+
+    # Standalone service runners
+    if args.web or (args.message and args.message[0] == "web"):
+        from nutrition_agent.web import run_server
+
+        run_server()
+        return
+
+    if args.bot or (args.message and args.message[0] == "bot"):
+        from nutrition_agent.bot import run_bot
+
+        run_bot()
+        return
+
+    if args.run_all or (args.message and args.message[0] in ("run", "all")):
+        import asyncio
+
+        import uvicorn
+
+        from nutrition_agent.bot import run_bot_async
+        from nutrition_agent.web import create_app
+
+        async def _run_both():
+            config = uvicorn.Config(
+                create_app(),
+                host=settings.web_host,
+                port=settings.web_port,
+                log_level="info",
+            )
+            server = uvicorn.Server(config)
+            await asyncio.gather(server.serve(), run_bot_async())
+
+        asyncio.run(_run_both())
+        return
 
     init_db(settings.database_path)
     conn = get_connection(settings.database_path)

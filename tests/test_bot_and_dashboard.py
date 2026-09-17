@@ -1,0 +1,363 @@
+"""Tests for Discord progress bars, weight deltas, trend, heatmap and dashboard aggregations."""
+
+import sqlite3
+from datetime import datetime, timedelta
+
+import discord
+import pytest
+
+from nutrition_agent.bot import render_discord_progress_bar
+from nutrition_agent.db import SCHEMA_SQL, get_connection
+from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog, CalculatedWorkoutLog
+from nutrition_agent.repository import (
+    get_daily_weight_comparison,
+    get_dashboard_kpis,
+    get_heatmap_data,
+    get_unified_records,
+    get_weight_delta,
+    get_weight_trend,
+    get_workout_logs_in_range,
+    save_food_logs,
+    save_weight_log,
+    save_workout_log,
+)
+
+
+@pytest.fixture
+def seeded_db() -> sqlite3.Connection:
+    """Fixture with 10 days of food, weight and workout logs."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    base_day = datetime(2026, 9, 8)
+
+    for offset in range(10):
+        day = (base_day + timedelta(days=offset)).strftime("%Y-%m-%d")
+
+        # Food: 2000 kcal, 140 g DIAAS protein per day
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{day}T12:00:00Z",
+                    raw_input="test",
+                    food_name_matched="Kuřecí prsa",
+                    amount_g=200.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=2000.0,
+                    protein_raw=140.0,
+                    protein_usable=140.0,
+                    carbs=150.0,
+                    fats=60.0,
+                )
+            ],
+        )
+
+        # Weight: linear growth from 83.0 kg
+        save_weight_log(
+            conn,
+            CalculatedWeightLog(
+                logged_at=f"{day}T07:00:00Z",
+                raw_input=f"{83.0 + offset * 0.1:.1f} kg",
+                weight_kg=round(83.0 + offset * 0.1, 2),
+            ),
+        )
+
+        # Workout every third day
+        if offset % 3 == 0:
+            save_workout_log(
+                conn,
+                CalculatedWorkoutLog(
+                    logged_at=f"{day}T18:00:00Z",
+                    raw_input="trenink nohy 60 min",
+                    workout_type="Silový trénink",
+                    duration_minutes=60,
+                ),
+            )
+
+    return conn
+
+
+def test_discord_progress_bar_rendering():
+    """Verify Unicode block progress bar output and percentage clamping."""
+    assert render_discord_progress_bar(50.0, 100.0, width=10) == "[█████░░░░░] 50 %"
+    assert render_discord_progress_bar(0.0, 100.0, width=10) == "[░░░░░░░░░░] 0 %"
+    assert render_discord_progress_bar(100.0, 100.0, width=10) == "[██████████] 100 %"
+
+    # Over-target values are clamped to a full bar but keep the real percentage
+    over = render_discord_progress_bar(200.0, 100.0, width=10)
+    assert over.startswith("[██████████]")
+    assert "200 %" in over
+
+    # Zero or negative target must not raise
+    assert render_discord_progress_bar(10.0, 0.0, width=10) == "[░░░░░░░░░░] 0 %"
+
+
+def test_weight_delta_over_period(seeded_db: sqlite3.Connection):
+    """Verify weight delta computation across an explicit window."""
+    start = "2026-09-08T00:00:00"
+    end = "2026-09-17T23:59:59"
+
+    stats = get_weight_delta(seeded_db, start, end)
+    assert stats["count"] == 10
+    assert stats["start_weight"] == 83.0
+    assert stats["current_weight"] == 83.9
+    assert stats["delta_kg"] == 0.9
+    assert stats["min_weight"] == 83.0
+    assert stats["max_weight"] == 83.9
+
+
+def test_weight_delta_empty_period_uses_latest(seeded_db: sqlite3.Connection):
+    """Empty window falls back to the latest known weight with zero delta."""
+    stats = get_weight_delta(seeded_db, "2000-01-01T00:00:00", "2000-01-02T00:00:00")
+    assert stats["count"] == 0
+    assert stats["delta_kg"] == 0.0
+    assert stats["current_weight"] == 83.9
+
+
+def test_daily_weight_comparison_delta(seeded_db: sqlite3.Connection):
+    """Verify today vs previous logged day delta."""
+    current, delta = get_daily_weight_comparison(seeded_db, "2026-09-17")
+    assert current is not None
+    assert current.weight_kg == 83.9
+    assert delta == 0.1
+
+
+def test_daily_weight_comparison_without_previous_log():
+    """Day with a single weight log has no delta."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+    save_weight_log(
+        conn,
+        CalculatedWeightLog(logged_at="2026-09-17T07:00:00Z", raw_input="83 kg", weight_kg=83.0),
+    )
+
+    current, delta = get_daily_weight_comparison(conn, "2026-09-17")
+    assert current is not None
+    assert delta is None
+
+
+def test_daily_weight_comparison_missing_day(seeded_db: sqlite3.Connection):
+    """Day without any weight log returns None for both values."""
+    current, delta = get_daily_weight_comparison(seeded_db, "2030-01-01")
+    assert current is None
+    assert delta is None
+
+
+def test_weight_trend_moving_average(seeded_db: sqlite3.Connection):
+    """Verify 7-day rolling average smoothing the raw weight points."""
+    trend = get_weight_trend(seeded_db, "2026-09-08T00:00:00", "2026-09-17T23:59:59")
+
+    assert len(trend) == 10
+    assert trend[0]["date"] == "2026-09-08"
+    assert trend[0]["weight_kg"] == 83.0
+    # First point has only itself in the window
+    assert trend[0]["moving_avg_7d"] == 83.0
+
+    # 7th point averages the first seven days: 83.0 through 83.6 -> 83.3
+    assert trend[6]["date"] == "2026-09-14"
+    assert trend[6]["moving_avg_7d"] == 83.3
+
+    # 8th point window is days 2-8 (83.1 .. 83.7) -> 83.4
+    assert trend[7]["moving_avg_7d"] == 83.4
+
+    # Last point window is days 4-10 (83.3 .. 83.9) -> 83.6
+    assert trend[9]["moving_avg_7d"] == 83.6
+
+
+def test_weight_trend_empty(seeded_db: sqlite3.Connection):
+    """Empty window yields an empty trend list."""
+    assert get_weight_trend(seeded_db, "2000-01-01T00:00:00", "2000-01-02T00:00:00") == []
+
+
+def test_dashboard_kpis_aggregation(seeded_db: sqlite3.Connection):
+    """Verify KPI aggregation over a time window."""
+    kpis = get_dashboard_kpis(seeded_db, "2026-09-08T00:00:00", "2026-09-17T23:59:59")
+
+    assert kpis["current_weight"] == 83.9
+    assert kpis["weight_delta"] == 0.9
+    assert kpis["avg_calories"] == 2000.0
+    assert kpis["avg_protein_diaas"] == 140.0
+    assert kpis["total_food_days"] == 10
+    # Workouts on offsets 0, 3, 6, 9 -> four distinct days
+    assert kpis["total_workout_days"] == 4
+
+
+def test_dashboard_kpis_empty_database():
+    """KPIs on an empty database must be zero/None without raising."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    kpis = get_dashboard_kpis(conn)
+    assert kpis["current_weight"] is None
+    assert kpis["weight_delta"] is None
+    assert kpis["avg_calories"] == 0.0
+    assert kpis["avg_protein_diaas"] == 0.0
+    assert kpis["total_workout_days"] == 0
+
+
+def test_heatmap_levels_and_workout_markers(seeded_db: sqlite3.Connection):
+    """Verify heatmap adherence levels, workout markers and day coverage."""
+    cells = get_heatmap_data(
+        seeded_db,
+        "2026-09-08T00:00:00",
+        "2026-09-17T23:59:59",
+        target_calories=2000.0,
+        target_protein=140.0,
+    )
+
+    assert len(cells) == 10
+    assert [c["date"] for c in cells] == sorted(c["date"] for c in cells)
+
+    # 2000 kcal and 140 g DIAAS hit both targets exactly -> green
+    assert all(c["level"] == "green" for c in cells)
+    assert cells[0]["has_workout"] is True
+    assert cells[1]["has_workout"] is False
+    assert cells[0]["workout_type"] == "Silový trénink"
+    assert cells[0]["calories"] == 2000.0
+    assert cells[0]["protein_usable"] == 140.0
+
+
+def test_heatmap_level_classification():
+    """Verify blue (protein only), amber (under target) and empty (no data) levels."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    def add_day(day: str, calories: float, protein: float) -> None:
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{day}T12:00:00Z",
+                    raw_input="test",
+                    food_name_matched="Test",
+                    amount_g=100.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=calories,
+                    protein_raw=protein,
+                    protein_usable=protein,
+                    carbs=0.0,
+                    fats=0.0,
+                )
+            ],
+        )
+
+    # Protein target hit, calories far below -> blue
+    add_day("2026-09-01", 1000.0, 150.0)
+    # Both below target -> amber
+    add_day("2026-09-02", 1000.0, 50.0)
+    # No record -> empty
+    cells = get_heatmap_data(conn, "2026-09-01T00:00:00", "2026-09-03T23:59:59")
+
+    levels = {c["date"]: c["level"] for c in cells}
+    assert levels["2026-09-01"] == "blue"
+    assert levels["2026-09-02"] == "amber"
+    assert levels["2026-09-03"] == "empty"
+
+
+def test_heatmap_without_explicit_range_uses_data_bounds(seeded_db: sqlite3.Connection):
+    """Without a range the heatmap spans the available data."""
+    cells = get_heatmap_data(seeded_db)
+    assert len(cells) == 10
+    assert cells[0]["date"] == "2026-09-08"
+    assert cells[-1]["date"] == "2026-09-17"
+
+
+def test_unified_records_pagination_and_filtering(seeded_db: sqlite3.Connection):
+    """Verify unified history ordering, filtering and pagination counters."""
+    all_items, total = get_unified_records(seeded_db, record_type="all", limit=5, offset=0)
+    assert total == 24  # 10 food + 10 weight + 4 workout
+    assert len(all_items) == 5
+    # Sorted descending by timestamp
+    assert all_items[0]["logged_at"] >= all_items[-1]["logged_at"]
+
+    next_page, _ = get_unified_records(seeded_db, record_type="all", limit=5, offset=5)
+    assert len(next_page) == 5
+    assert {i["logged_at"] for i in next_page}.isdisjoint({i["logged_at"] for i in all_items})
+
+    food_items, food_total = get_unified_records(seeded_db, record_type="food")
+    assert food_total == 10
+    assert all(i["type"] == "food" for i in food_items)
+
+    weight_items, weight_total = get_unified_records(seeded_db, record_type="weight")
+    assert weight_total == 10
+    assert all(i["type"] == "weight" for i in weight_items)
+
+    workout_items, workout_total = get_unified_records(seeded_db, record_type="workout")
+    assert workout_total == 4
+    assert all(i["type"] == "workout" for i in workout_items)
+    assert all("Silový trénink" in i["title"] for i in workout_items)
+
+
+def test_workout_logs_in_range_filtering(seeded_db: sqlite3.Connection):
+    """Verify workout range filtering boundaries."""
+    logs = get_workout_logs_in_range(seeded_db, "2026-09-08T00:00:00", "2026-09-14T23:59:59")
+    # Offsets 0, 3, 6 fall inside 2026-09-08 .. 2026-09-14
+    assert len(logs) == 3
+    assert all(log.duration_minutes == 60 for log in logs)
+
+
+def test_workout_log_roundtrip_preserves_none_duration():
+    """Workout without duration stores and reads back NULL correctly."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+    saved = save_workout_log(
+        conn,
+        CalculatedWorkoutLog(raw_input="trenink", workout_type="Běh", duration_minutes=None),
+    )
+    assert saved.id is not None
+
+    logs = get_workout_logs_in_range(conn)
+    assert len(logs) == 1
+    assert logs[0].duration_minutes is None
+    assert logs[0].workout_type == "Běh"
+
+
+def test_bot_registers_expected_slash_commands(monkeypatch: pytest.MonkeyPatch):
+    """Verify the bot exposes the required slash commands and dashboard button."""
+    import nutrition_agent.bot as bot_module
+
+    client, tree = bot_module.create_bot()
+    command_names = {cmd.name for cmd in tree.get_commands()}
+
+    assert {"dnes", "vaha", "trenink", "prehled", "web"} <= command_names
+
+    view = bot_module.build_dashboard_view()
+    assert len(view.children) == 1
+    button = view.children[0]
+    assert isinstance(button, discord.ui.Button)
+    assert button.style == discord.ButtonStyle.link
+    assert button.url.startswith("http://")
+
+
+def test_bot_message_content_intent_is_enabled(monkeypatch: pytest.MonkeyPatch):
+    """The bot must subscribe to message content to read natural language logs."""
+    import nutrition_agent.bot as bot_module
+
+    client, _ = bot_module.create_bot()
+    assert client.intents.message_content is True
+
+
+def test_bot_requires_token_fail_fast(monkeypatch: pytest.MonkeyPatch):
+    """Running the bot without a token raises a clear configuration error."""
+    import asyncio
+
+    import nutrition_agent.bot as bot_module
+
+    settings_override = type(bot_module.settings)(
+        database_path=bot_module.settings.database_path,
+        foods_data_path=bot_module.settings.foods_data_path,
+        log_level="WARNING",
+        gemini_api_key=None,
+        discord_bot_token=None,
+        web_host="127.0.0.1",
+        web_port=8000,
+        target_calories=None,
+        target_protein_g=None,
+    )
+    monkeypatch.setattr(bot_module, "settings", settings_override)
+
+    with pytest.raises(ValueError, match="DISCORD_BOT_TOKEN"):
+        asyncio.run(bot_module.run_bot_async())

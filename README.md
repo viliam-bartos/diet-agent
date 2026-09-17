@@ -1,6 +1,6 @@
 # Nutrition Agent
 
-Minimalistický systém pro záznam stravy, maker a tělesné hmotnosti formou chatu (CLI, v budoucnu Discord bot).
+Minimalistický systém pro záznam stravy, maker, tělesné hmotnosti a tréninků formou chatu (CLI, Discord bot) s webovým dashboardem.
 
 Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhradně jako bezstavový parser pro extrakci entit z volného textu do striktního Pydantic schématu. Veškeré výpočty, kalorie a databázové operace probíhají deterministicky v lokálním kódu v Pythonu s diskontováním bílkovin podle DIAAS a ukládáním do lokální SQLite databáze.
 
@@ -8,13 +8,18 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
 
 ## Architektura projektu
 
-- `src/nutrition_agent/models.py`: Pydantic schémata (`UserLog`, `ExtractedFoodItem`, `FoodDefinition`, `CalculatedFoodLog`, `CalculatedWeightLog`) a doménové výjimky (`FoodNotFoundError`, `WeightValidationError`).
-- `src/nutrition_agent/nutrition.py`: Výpočet využitelných bílkovin (DIAAS), přepočet jednotek na gramy, validace tělesné hmotnosti a fuzzy párování potravin (`rapidfuzz`).
+- `src/nutrition_agent/models.py`: Pydantic schémata (`UserLog`, `ExtractedFoodItem`, `FoodDefinition`, `CalculatedFoodLog`, `CalculatedWeightLog`, `CalculatedWorkoutLog`) a doménové výjimky (`FoodNotFoundError`, `WeightValidationError`).
+- `src/nutrition_agent/nutrition.py`: Výpočet využitelných bílkovin (DIAAS), přepočet jednotek na gramy, přepočet tepelné úpravy, validace tělesné hmotnosti a fuzzy párování potravin (`rapidfuzz`).
+- `src/nutrition_agent/targets.py`: Nutriční stavy (Lean Bulk, Maintenance, Cut), typy dne a dynamický výpočet cílů podle váhy.
 - `src/nutrition_agent/llm.py`: Bezstavový parser volající Google Gemini Flash přes `google-genai` SDK se strukturovaným JSON výstupem.
 - `src/nutrition_agent/db.py`: SQLite inicializace schématu a správa spojení.
-- `src/nutrition_agent/repository.py`: Načítání katalogu potravin (`data/foods.json`) a ukládání/čtení záznamů v SQLite.
+- `src/nutrition_agent/repository.py`: Veškeré DB dotazy a agregace (denní okna, delta váhy, 7denní klouzavý průměr, heatmapa, stránkování).
+- `src/nutrition_agent/reporting.py`: Textové přehledy a grafy pro denní, týdenní, měsíční, půlroční, roční a kompletní období.
 - `src/nutrition_agent/config.py`: Konfigurace aplikace a načítání proměnných prostředí.
-- `src/nutrition_agent/cli.py`: Rozhraní příkazové řádky pro interaktivní režim i jednorázové zprávy.
+- `src/nutrition_agent/cli.py`: Rozhraní příkazové řádky pro interaktivní režim, jednorázové zprávy a spouštění služeb.
+- `src/nutrition_agent/bot.py`: Discord bot se Slash Commands a nasloucháním na zprávy.
+- `src/nutrition_agent/web.py`: FastAPI server a REST API dashboardu.
+- `src/nutrition_agent/templates/dashboard.html`: HTML šablona dashboardu s čistým CSS a Chart.js.
 - `data/foods.json`: Lokální katalog potravin s nutričními hodnotami a DIAAS koeficienty.
 - `spec.md`: Technická specifikace datového toku, SQLite schématu a DIAAS koeficientů.
 - `vault.md`: Referenční tabulka surovin, převodní jednotky a pravidla pro fuzzy matching.
@@ -25,6 +30,7 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
 
 - Python >= 3.12
 - API klíč pro Google Gemini (`GEMINI_API_KEY`)
+- Token Discord bota (`DISCORD_BOT_TOKEN`) — pouze pro Discord bota
 
 ---
 
@@ -53,13 +59,20 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
    ```bash
    cp .env.example .env
    ```
-   Do souboru `.env` doplň svůj klíč:
+   Do souboru `.env` doplň klíče a volitelné cíle:
    ```env
    GEMINI_API_KEY=tvuj-gemini-api-klic
+   DISCORD_BOT_TOKEN=tvuj-discord-token
    DATABASE_PATH=data/nutrition.db
-   FOODS_DATA_PATH=data/foods.json
+   FOODS_DB_PATH=data/foods.json
    LOG_LEVEL=INFO
+   WEB_HOST=127.0.0.1
+   WEB_PORT=8000
+   TARGET_CALORIES=3150
+   TARGET_PROTEIN_G=155
    ```
+
+   `TARGET_CALORIES` a `TARGET_PROTEIN_G` jsou volitelné. Pokud nejsou nastavené, dashboard použije cíle odvozené z aktuální váhy, aktivního stavu a typu dne.
 
 ---
 
@@ -78,6 +91,7 @@ Příklady vstupů:
 - `Dneska k obědu 200g kuřecích prsou a 150g rýže`
 - `Váha 83.2 kg` (automaticky přepočítá nutriční cíle pro novou váhu)
 - `2 vejce a 1 banán`
+- `trenink nohy 60 min` (zaznamená trénink a přepne den na TRAINING)
 - `dnes` nebo `prehled` pro zobrazení denního souhrnu, plnění cílů a zbývajících hodnot
 - `tyden`, `mesic`, `pulrok`, `rok`, `vse` pro agregované přehledy s grafy
 - `cil bulk`, `cil maintenance`, `cil cut` pro změnu aktivního stavu
@@ -113,6 +127,90 @@ Zobrazení historie posledních N záznamů:
 ```bash
 nutrition-agent --history 10
 ```
+
+### Služby (web a Discord bot)
+
+Webový dashboard i Discord bota lze spustit samostatně nebo souběžně:
+```bash
+nutrition-agent --web       # Pouze webový dashboard na WEB_HOST:WEB_PORT
+nutrition-agent --bot       # Pouze Discord bot
+nutrition-agent --run-all   # Obojí souběžně v jednom asyncio event loopu
+```
+
+Alternativně lze služby spustit jako moduly:
+```bash
+python -m nutrition_agent.web
+python -m nutrition_agent.bot
+```
+
+---
+
+## Discord bot
+
+Bot kombinuje přímé naslouchání na zprávy s moderními Slash Commands. Veškeré DB dotazy a agregace řeší `repository.py`; bot pouze skládá odpovědi.
+
+### Přirozená konverzace
+
+Zpráva v DM nebo ve vyhrazeném kanálu (např. `200g kuřecích prsou a 150g rýže`) projde stejnou pipeline jako CLI. Odpověď je Discord Embed:
+- zelený pruh při úspěchu, červený při chybě,
+- výpis položek s makry a DIAAS bílkovinami,
+- tlačítko s odkazem na webový dashboard v patičce.
+
+### Slash Commands
+
+| Příkaz | Popis |
+| :--- | :--- |
+| `/dnes` | Mobilní přehled: hmotnost s deltou proti předchozímu vážení, status tréninku, makra s textovými progress bary a seznam dnešních jídel podle času. |
+| `/vaha <hodnota>` | Okamžitý záznam hmotnosti s validací a automatickým přepočtem cílů. |
+| `/trenink [typ] [delka_min] [poznamka]` | Rychlý záznam tréninku a přepnutí typu dne na TRAINING. |
+| `/prehled <obdobi>` | Textová tabulka za období (`tyden`, `mesic`, `pulrok`, `rok`, `vse`). |
+| `/web` | Přímý odkaz na webový dashboard. |
+
+Progress bary v Discordu používají Unicode bloky:
+```text
+Kalorie:   [████████░░░░] 65 %  (1625 / 2500 kcal)
+Bílkoviny: [██████████░░] 82 %  (131 / 160 g)
+```
+
+---
+
+## Webový dashboard
+
+Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
+
+| Endpoint | Popis |
+| :--- | :--- |
+| `GET /` | HTML dashboard. |
+| `GET /api/kpis?period=` | KPI karty: aktuální váha s deltou za období, průměrné kalorie a DIAAS bílkoviny, počet odtrénovaných dní. |
+| `GET /api/weight-trend?period=` | Body jednotlivých vážení a 7denní klouzavý průměr pro Chart.js. |
+| `GET /api/heatmap?period=` | Kalendářní adherence heatmapa po dnech. |
+| `GET /api/records?type=&limit=&offset=` | Stránkovaná a filtrovaná historie (jídla, váha, trénink). |
+| `POST /api/message` | Zpracuje textovou zprávu stejnou pipeline jako CLI a vrátí odpověď. |
+
+Parametr `period` přijímá `7d`, `30d`, `90d`, `180d`, `365d` a `all`.
+
+### Komponenty dashboardu
+
+- **Přepínače časového rozsahu**: 7 dní, 30 dní, 3 měsíce, 6 měsíců, 1 rok, Vše.
+- **KPI karty**: aktuální váha s deltou za zvolené období, průměrný denní příjem kalorií a využitelných bílkovin (DIAAS), celkový počet odtrénovaných dní.
+- **Interaktivní graf váhy** (Chart.js): body jednotlivých vážení a spojitá čára 7denního klouzavého průměru.
+- **Kalendářní heatmapa** ve stylu GitHubu: zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den.
+- **Tabulka záznamů**: stránkování, filtrování podle typu a zobrazení původního textu záznamu.
+
+Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--aperture-cyan` s fonty Barlow Semi Condensed a Space Mono.
+
+---
+
+## Databázové schéma (SQLite)
+
+| Tabulka | Účel |
+| :--- | :--- |
+| `food_logs` | Záznamy jídel s makry a DIAAS bílkovinami. |
+| `weight_logs` | Záznamy tělesné hmotnosti. |
+| `workout_logs` | Záznamy tréninků (typ, délka, poznámka). |
+| `user_settings` | Aktivní cíl, typ dne a referenční hodnoty profilu. |
+
+Schéma se inicializuje idempotentně (`CREATE TABLE IF NOT EXISTS`) při startu CLI, webu i bota, takže databáze vytvořené starší verzí se automaticky doplní o chybějící tabulky.
 
 ---
 
