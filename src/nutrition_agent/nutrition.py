@@ -11,6 +11,7 @@ from nutrition_agent.models import (
     MIN_FOOD_MATCH_SCORE,
     MIN_WEIGHT_KG,
     CalculatedFoodLog,
+    EstimatedFoodNutrition,
     ExtractedFoodItem,
     FoodDefinition,
     FoodNotFoundError,
@@ -272,4 +273,21 @@ def calculate_food_log(
         protein_usable=protein_usable,
         carbs=carbs,
         fats=fats,
+        nutrition_source=food_def.source,
+    )
+
+
+def build_food_from_estimate(estimate: EstimatedFoodNutrition) -> FoodDefinition:
+    """Turn an LLM nutrition estimate into a food definition flagged as AI-sourced."""
+    if estimate.calories <= 0 and estimate.protein <= 0 and estimate.carbs <= 0:
+        raise ValueError(f"Model nezná potravinu '{estimate.name}' a nevrátil použitelné hodnoty.")
+
+    return FoodDefinition(
+        name=estimate.name.strip().lower(),
+        calories=round(estimate.calories, 1),
+        protein=round(estimate.protein, 2),
+        carbs=round(estimate.carbs, 2),
+        fats=round(estimate.fats, 2),
+        diaas_coefficient=get_coefficient_for_category(estimate.protein_category),
+        source="ai",
     )

@@ -9,6 +9,7 @@ from nutrition_agent.models import (
     CalculatedWeightLog,
     CalculatedWorkoutLog,
     FoodDefinition,
+    food_name_key,
     utc_now_iso,
 )
 from nutrition_agent.targets import DayType, DietGoal
@@ -26,6 +27,146 @@ def load_foods_from_json(file_path: str | Path = "data/foods.json") -> list[Food
     return [FoodDefinition.model_validate(item) for item in data]
 
 
+FOOD_COLUMNS = "name, calories, protein, diaas_coefficient, carbs, fats, source"
+
+
+def _row_to_food(row: sqlite3.Row) -> FoodDefinition:
+    """Convert a foods row into a FoodDefinition model."""
+    return FoodDefinition(
+        name=row["name"],
+        calories=row["calories"],
+        protein=row["protein"],
+        diaas_coefficient=row["diaas_coefficient"],
+        carbs=row["carbs"],
+        fats=row["fats"],
+        source=row["source"],
+    )
+
+
+def ensure_food_catalog(conn: sqlite3.Connection, json_path: str | Path) -> int:
+    """Seed curated foods from the JSON catalog into the foods table.
+
+    Idempotent: existing rows (including user-corrected or AI-added ones) are
+    never overwritten, so only missing curated foods are inserted.
+    """
+    foods = load_foods_from_json(json_path)
+    now = utc_now_iso()
+    cursor = conn.cursor()
+    inserted = 0
+    for food in foods:
+        cursor.execute(
+            """
+            INSERT INTO foods
+                (name, name_key, calories, protein, diaas_coefficient, carbs, fats,
+                 source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'curated', ?, ?)
+            ON CONFLICT(name_key) DO NOTHING
+            """,
+            (
+                food.name,
+                food_name_key(food.name),
+                food.calories,
+                food.protein,
+                food.diaas_coefficient,
+                food.carbs,
+                food.fats,
+                now,
+                now,
+            ),
+        )
+        inserted += cursor.rowcount
+    conn.commit()
+    return inserted
+
+
+def load_foods(conn: sqlite3.Connection, source: str | None = None) -> list[FoodDefinition]:
+    """Load food definitions from the foods table.
+
+    Curated catalog entries come first so that fuzzy matching prefers them over
+    AI-estimated entries when scores tie.
+    """
+    sql = f"SELECT {FOOD_COLUMNS} FROM foods"
+    params: tuple[str, ...] = ()
+    if source:
+        sql += " WHERE source = ?"
+        params = (source,)
+    sql += " ORDER BY (source = 'curated') DESC, name ASC"
+
+    return [_row_to_food(row) for row in conn.execute(sql, params).fetchall()]
+
+
+def get_food(conn: sqlite3.Connection, name: str) -> FoodDefinition | None:
+    """Fetch a single food by name, ignoring case and redundant whitespace."""
+    row = conn.execute(
+        f"SELECT {FOOD_COLUMNS} FROM foods WHERE name_key = ?",
+        (food_name_key(name),),
+    ).fetchone()
+    return _row_to_food(row) if row is not None else None
+
+
+def save_learned_food(conn: sqlite3.Connection, food: FoodDefinition) -> bool:
+    """Store an AI-estimated food so later logs reuse the same numbers.
+
+    Returns True when a new row was inserted, False when the food already existed.
+    """
+    if food.source != "ai":
+        raise ValueError("save_learned_food ukládá pouze odhady s source='ai'.")
+
+    now = utc_now_iso()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO foods
+            (name, name_key, calories, protein, diaas_coefficient, carbs, fats,
+             source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'ai', ?, ?)
+        ON CONFLICT(name_key) DO NOTHING
+        """,
+        (
+            food.name,
+            food_name_key(food.name),
+            food.calories,
+            food.protein,
+            food.diaas_coefficient,
+            food.carbs,
+            food.fats,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def update_food_nutrition(
+    conn: sqlite3.Connection,
+    name: str,
+    calories: float,
+    protein: float,
+    carbs: float,
+    fats: float,
+) -> FoodDefinition:
+    """Overwrite the nutrition values of an existing food (manual correction)."""
+    existing = get_food(conn, name)
+    if existing is None:
+        raise LookupError(f"Potravina '{name}' není v katalogu.")
+
+    conn.execute(
+        """
+        UPDATE foods
+        SET calories = ?, protein = ?, carbs = ?, fats = ?, updated_at = ?
+        WHERE name_key = ?
+        """,
+        (calories, protein, carbs, fats, utc_now_iso(), food_name_key(existing.name)),
+    )
+    conn.commit()
+
+    updated = get_food(conn, existing.name)
+    if updated is None:
+        raise LookupError(f"Potravina '{name}' po aktualizaci zmizela.")
+    return updated
+
+
 def save_food_logs(
     conn: sqlite3.Connection,
     logs: list[CalculatedFoodLog],
@@ -37,8 +178,9 @@ def save_food_logs(
     sql = """
     INSERT INTO food_logs (
         logged_at, raw_input, food_name_matched, amount_g,
-        state, is_estimated, calories, protein_raw, protein_usable, carbs, fats
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+        nutrition_source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     saved_logs: list[CalculatedFoodLog] = []
     cursor = conn.cursor()
@@ -57,6 +199,7 @@ def save_food_logs(
                 log.protein_usable,
                 log.carbs,
                 log.fats,
+                log.nutrition_source,
             ),
         )
         saved_logs.append(log.model_copy(update={"id": cursor.lastrowid}))
@@ -79,6 +222,25 @@ def save_weight_log(
     return log.model_copy(update={"id": cursor.lastrowid})
 
 
+def _row_to_food_log(row: sqlite3.Row) -> CalculatedFoodLog:
+    """Convert a food_logs row into a CalculatedFoodLog model."""
+    return CalculatedFoodLog(
+        id=row["id"],
+        logged_at=row["logged_at"],
+        raw_input=row["raw_input"],
+        food_name_matched=row["food_name_matched"],
+        amount_g=row["amount_g"],
+        state=row["state"],
+        is_estimated=bool(row["is_estimated"]),
+        calories=row["calories"],
+        protein_raw=row["protein_raw"],
+        protein_usable=row["protein_usable"],
+        carbs=row["carbs"],
+        fats=row["fats"],
+        nutrition_source=row["nutrition_source"],
+    )
+
+
 def get_recent_food_logs(
     conn: sqlite3.Connection,
     limit: int = 50,
@@ -86,31 +248,15 @@ def get_recent_food_logs(
     """Fetch recent food logs ordered descending by timestamp."""
     sql = """
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats
+           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+           nutrition_source
     FROM food_logs
     ORDER BY logged_at DESC
     LIMIT ?
     """
     cursor = conn.cursor()
     cursor.execute(sql, (limit,))
-    rows = cursor.fetchall()
-    return [
-        CalculatedFoodLog(
-            id=row["id"],
-            logged_at=row["logged_at"],
-            raw_input=row["raw_input"],
-            food_name_matched=row["food_name_matched"],
-            amount_g=row["amount_g"],
-            state=row["state"],
-            is_estimated=bool(row["is_estimated"]),
-            calories=row["calories"],
-            protein_raw=row["protein_raw"],
-            protein_usable=row["protein_usable"],
-            carbs=row["carbs"],
-            fats=row["fats"],
-        )
-        for row in rows
-    ]
+    return [_row_to_food_log(row) for row in cursor.fetchall()]
 
 
 def get_recent_weight_logs(
@@ -145,31 +291,15 @@ def get_daily_food_logs(
     """Fetch food logs for a given day (date_prefix in ISO 8601, e.g. 'YYYY-MM-DD')."""
     sql = """
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats
+           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+           nutrition_source
     FROM food_logs
     WHERE logged_at LIKE ? || '%'
     ORDER BY logged_at ASC
     """
     cursor = conn.cursor()
     cursor.execute(sql, (date_prefix,))
-    rows = cursor.fetchall()
-    return [
-        CalculatedFoodLog(
-            id=row["id"],
-            logged_at=row["logged_at"],
-            raw_input=row["raw_input"],
-            food_name_matched=row["food_name_matched"],
-            amount_g=row["amount_g"],
-            state=row["state"],
-            is_estimated=bool(row["is_estimated"]),
-            calories=row["calories"],
-            protein_raw=row["protein_raw"],
-            protein_usable=row["protein_usable"],
-            carbs=row["carbs"],
-            fats=row["fats"],
-        )
-        for row in rows
-    ]
+    return [_row_to_food_log(row) for row in cursor.fetchall()]
 
 
 def get_latest_weight_log(
@@ -320,31 +450,15 @@ def get_food_logs_in_range(
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"""
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats
+           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+           nutrition_source
     FROM food_logs
     {where_clause}
     ORDER BY logged_at ASC
     """
     cursor = conn.cursor()
     cursor.execute(sql, tuple(params))
-    rows = cursor.fetchall()
-    return [
-        CalculatedFoodLog(
-            id=row["id"],
-            logged_at=row["logged_at"],
-            raw_input=row["raw_input"],
-            food_name_matched=row["food_name_matched"],
-            amount_g=row["amount_g"],
-            state=row["state"],
-            is_estimated=bool(row["is_estimated"]),
-            calories=row["calories"],
-            protein_raw=row["protein_raw"],
-            protein_usable=row["protein_usable"],
-            carbs=row["carbs"],
-            fats=row["fats"],
-        )
-        for row in rows
-    ]
+    return [_row_to_food_log(row) for row in cursor.fetchall()]
 
 
 def get_weight_logs_in_range(
@@ -704,13 +818,16 @@ def get_unified_records(
         cursor.execute(
             """
             SELECT id, logged_at, raw_input, food_name_matched, amount_g, state,
-                   calories, protein_raw, protein_usable, carbs, fats
+                   calories, protein_raw, protein_usable, carbs, fats, nutrition_source
             FROM food_logs
             ORDER BY logged_at DESC
             """
         )
         for row in cursor.fetchall():
-            food_desc = f"{row['food_name_matched']} ({row['amount_g']:.0f} g, {row['state']})"
+            ai_flag = " [AI odhad]" if row["nutrition_source"] == "ai" else ""
+            food_desc = (
+                f"{row['food_name_matched']} ({row['amount_g']:.0f} g, {row['state']}){ai_flag}"
+            )
             records.append(
                 {
                     "type": "food",

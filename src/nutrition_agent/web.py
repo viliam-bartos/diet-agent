@@ -11,12 +11,13 @@ from nutrition_agent.cli import handle_user_message
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
 from nutrition_agent.repository import (
+    ensure_food_catalog,
     get_dashboard_kpis,
     get_heatmap_data,
     get_unified_records,
     get_user_profile,
     get_weight_trend,
-    load_foods_from_json,
+    load_foods,
 )
 from nutrition_agent.targets import calculate_daily_targets
 
@@ -137,9 +138,9 @@ def create_app() -> FastAPI:
 
     @app.post("/api/message")
     async def api_message(payload: MessagePayload):
-        init_db(settings.database_path)
         conn = get_connection(settings.database_path)
-        foods = load_foods_from_json(settings.foods_data_path)
+        ensure_food_catalog(conn, settings.foods_data_path)
+        foods = load_foods(conn)
         try:
             reply = handle_user_message(payload.message, foods, conn)
             return {"reply": reply}

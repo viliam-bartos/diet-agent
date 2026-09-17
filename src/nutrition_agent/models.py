@@ -41,6 +41,16 @@ def parse_date_argument(value: str | None) -> str:
         ) from exc
 
 
+def food_name_key(name: str) -> str:
+    """Normalized lookup key for a food name.
+
+    SQLite's built-in NOCASE collation only folds ASCII, so 'Kuřecí prsa' would
+    never match 'KUŘECÍ PRSA'. Python's lower() handles Unicode, so the key is
+    computed here and stored next to the display name.
+    """
+    return " ".join(name.split()).lower()
+
+
 class FoodNotFoundError(Exception):
     """Raised when food matching score in foods database is below threshold (< 75%)."""
 
@@ -199,7 +209,11 @@ class UserLog(BaseModel):
 
 
 class FoodDefinition(BaseModel):
-    """Food entry in local foods.json database."""
+    """Food entry with nutrition values per 100 g.
+
+    ``source`` distinguishes curated catalog entries from nutrition values that
+    were estimated by the LLM for a food missing from the catalog.
+    """
 
     model_config = ConfigDict(extra="ignore")
 
@@ -209,6 +223,51 @@ class FoodDefinition(BaseModel):
     diaas_coefficient: float = 0.70
     carbs: float
     fats: float
+    source: Literal["curated", "ai"] = "curated"
+
+
+class EstimatedFoodNutrition(BaseModel):
+    """Nutrition values estimated by the LLM for an unknown food, per 100 g."""
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    name: str = Field(description="Normalizovaný název potraviny v češtině, jednotné číslo")
+    calories: float = Field(description="Energie na 100 g v kcal")
+    protein: float = Field(description="Bílkoviny na 100 g v gramech")
+    carbs: float = Field(description="Sacharidy na 100 g v gramech")
+    fats: float = Field(description="Tuky na 100 g v gramech")
+    protein_category: Literal[
+        "animal",
+        "plant_isolate",
+        "legumes",
+        "grains_seeds",
+        "nuts_peanuts",
+        "unknown",
+    ] = Field(
+        default="unknown",
+        description="Kategorie zdroje bílkovin pro DIAAS diskontování",
+    )
+
+    @field_validator("calories", "protein", "carbs", "fats")
+    @classmethod
+    def validate_non_negative(cls, value: float) -> float:
+        """Nutrition values cannot be negative (Fail Fast)."""
+        if value < 0:
+            raise ValueError("Nutriční hodnota nesmí být záporná.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_energy_consistency(self) -> "EstimatedFoodNutrition":
+        """Reject estimates whose macros cannot add up to the stated energy."""
+        macro_energy = self.protein * 4.0 + self.carbs * 4.0 + self.fats * 9.0
+        if self.calories > 0 and macro_energy > 0:
+            deviation = abs(macro_energy - self.calories) / self.calories
+            if deviation > 0.35:
+                raise ValueError(
+                    f"Odhad je nekonzistentní: makra dávají {macro_energy:.0f} kcal, "
+                    f"ale uvedeno je {self.calories:.0f} kcal."
+                )
+        return self
 
 
 class CalculatedFoodLog(BaseModel):
@@ -228,6 +287,7 @@ class CalculatedFoodLog(BaseModel):
     protein_usable: float
     carbs: float
     fats: float
+    nutrition_source: Literal["curated", "ai"] = "curated"
 
 
 class CalculatedWeightLog(BaseModel):

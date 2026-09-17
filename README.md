@@ -21,7 +21,7 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
 - `src/nutrition_agent/bot.py`: Discord bot se Slash Commands a nasloucháním na zprávy.
 - `src/nutrition_agent/web.py`: FastAPI server a REST API dashboardu.
 - `src/nutrition_agent/templates/dashboard.html`: HTML šablona dashboardu s čistým CSS a Chart.js.
-- `data/foods.json`: Lokální katalog potravin s nutričními hodnotami a DIAAS koeficienty.
+- `data/foods.json`: Kurátorovaný katalog potravin, který se při startu dosévá do tabulky `foods`.
 - `spec.md`: Technická specifikace datového toku, SQLite schématu a DIAAS koeficientů.
 - `vault.md`: Referenční tabulka surovin, převodní jednotky a pravidla pro fuzzy matching.
 
@@ -116,6 +116,7 @@ Příklady vstupů:
 - `den trenink` nebo `den odpocinek` pro přepnutí tréninkového stavu
 - `historie` pro zobrazení posledních záznamů
 - `vymaz` pro smazání dnešních záznamů, `vymaz vcera` nebo `vymaz 2026-09-15` pro jiný den
+- `jidlo kuřecí kari` pro zobrazení nebo opravu hodnot potraviny v katalogu
 
 Ukončení interaktivního režimu zadáním `konec`, `exit` nebo `quit`.
 
@@ -242,16 +243,57 @@ Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--apert
 
 ---
 
+## Katalog potravin a automatické doplňování
+
+Katalog žije v tabulce `foods` v SQLite a má dvě vrstvy, které se nikdy nemíchají:
+
+| Vrstva | Zdroj | Význam |
+| :--- | :--- | :--- |
+| `curated` | `data/foods.json` | Kurátorované hodnoty, které jsi zadal nebo ověřil. |
+| `ai` | Odhad modelu | Přibližné hodnoty pro potraviny, které v katalogu chyběly. |
+
+**Lokální katalog má vždy přednost.** Model se na hodnoty ptá jen ve chvíli, kdy fuzzy párování selže (skóre pod 75 %). Když potravinu odhadne, rovnou ji uloží, takže při příštím záznamu se použijí stejná čísla a model se nevolá znovu.
+
+### Jak se odhad pozná
+
+- V odpovědi je u položky `[AI odhad maker]` a pod ní výpis uložených hodnot.
+- V `food_logs` je uložen sloupec `nutrition_source`, takže příznak přežije i do historie a dashboardu (řádek má v názvu `[AI odhad]`).
+- V souhrnech se odhad neschovává za měření — je vidět, odkud čísla jsou.
+
+### Oprava hodnot
+
+Odhad jde kdykoliv přepsat na reálné hodnoty z etikety:
+
+```
+jidlo kuřecí kari                    # zobrazí aktuální hodnoty na 100 g
+jidlo kuřecí kari 145 13 7 7         # přepíše kcal, bílkoviny, sacharidy, tuky
+```
+
+Hodnoty jsou vždy na 100 g, oddělovač může být i desetinná čárka. Oprava se vztahuje na budoucí záznamy; už zapsané dny se nepřepočítávají, aby historie zůstala konzistentní.
+
+### Co model neumí
+
+- **DIAAS koeficient** se neodhaduje volně. Model vybere jednu z pěti kategorií bílkovin (`animal`, `plant_isolate`, `legumes`, `grains_seeds`, `nuts_peanuts`) a koeficient se dopočítá lokálně. Když si není jistý, použije se konzervativní `0.70`.
+- **Nekonzistentní odhad se odmítne.** Pokud makra neodpovídají uvedené energii (odchylka nad 35 %), hodnoty se neuloží.
+- **Neznámou potravinu model přizná.** Když vrátí samé nuly, záznam se odmítne s chybou místo vymyšlených čísel.
+
+Tyto hodnoty jsou odhad, ne měření. Přesnost je u základních surovin vysoká, u složených jídel klidně ±30 %.
+
+---
+
 ## Databázové schéma (SQLite)
 
 | Tabulka | Účel |
 | :--- | :--- |
-| `food_logs` | Záznamy jídel s makry a DIAAS bílkovinami. |
+| `food_logs` | Záznamy jídel s makry, DIAAS bílkovinami a zdrojem hodnot (`nutrition_source`). |
 | `weight_logs` | Záznamy tělesné hmotnosti. |
 | `workout_logs` | Záznamy tréninků (typ, délka, poznámka). |
+| `foods` | Katalog potravin, kurátorovaný i odhadnutý, s vyhledávacím klíčem `name_key`. |
 | `user_settings` | Aktivní cíl, typ dne a referenční hodnoty profilu. |
 
-Schéma se inicializuje idempotentně (`CREATE TABLE IF NOT EXISTS`) při startu CLI, webu i bota, takže databáze vytvořené starší verzí se automaticky doplní o chybějící tabulky.
+Sloupec `name_key` drží název převedený na malá písmena přes Python, protože SQLite vestavěná kolace `NOCASE` skládá jen ASCII a `KUŘECÍ` by se s `kuřecí` neshodovalo.
+
+Schéma se inicializuje idempotentně při startu CLI, webu i bota. Databáze z starší verze se automaticky doplní o chybějící sloupce a tabulky; kurátorované potraviny se dosévají přes `INSERT ... ON CONFLICT DO NOTHING`, takže tvoje opravy ani naučené potraviny se nikdy nepřepíšou.
 
 ---
 

@@ -1,13 +1,14 @@
 """Command line interface for Nutrition Agent."""
 
 import argparse
+import logging
 import re
 import sqlite3
 from datetime import datetime
 
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
-from nutrition_agent.llm import parse_user_message
+from nutrition_agent.llm import estimate_food_nutrition, parse_user_message
 from nutrition_agent.models import (
     CalculatedWeightLog,
     CalculatedWorkoutLog,
@@ -17,6 +18,7 @@ from nutrition_agent.models import (
     parse_date_argument,
 )
 from nutrition_agent.nutrition import (
+    build_food_from_estimate,
     calculate_food_log,
     find_matching_food,
     validate_body_weight,
@@ -25,15 +27,19 @@ from nutrition_agent.reporting import format_daily_target_breakdown, generate_pe
 from nutrition_agent.repository import (
     DAY_LOG_LABELS,
     delete_day_logs,
+    ensure_food_catalog,
     get_daily_food_logs,
+    get_food,
     get_recent_food_logs,
     get_recent_weight_logs,
     get_user_profile,
-    load_foods_from_json,
+    load_foods,
     save_food_logs,
+    save_learned_food,
     save_weight_log,
     save_workout_log,
     set_user_setting,
+    update_food_nutrition,
 )
 from nutrition_agent.targets import (
     DayType,
@@ -41,6 +47,8 @@ from nutrition_agent.targets import (
     parse_day_type,
     parse_goal,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def format_day_counts(counts: dict[str, int]) -> str:
@@ -61,6 +69,89 @@ def delete_day(conn: sqlite3.Connection, day: str) -> str:
     return "\n".join(lines)
 
 
+def resolve_food(
+    conn: sqlite3.Connection,
+    food_name: str,
+    foods: list[FoodDefinition],
+) -> tuple[FoodDefinition, bool]:
+    """Resolve a food name against the catalog, falling back to an AI estimate.
+
+    Returns the matched food definition and whether it had to be learned. The
+    local catalog always wins; the model is only asked when matching fails.
+    """
+    try:
+        food_def, _ = find_matching_food(food_name, foods)
+        return food_def, False
+    except FoodNotFoundError:
+        logger.info("Potravina '%s' není v katalogu, žádám model o odhad.", food_name)
+
+    estimate = estimate_food_nutrition(food_name)
+    learned = build_food_from_estimate(estimate)
+    save_learned_food(conn, learned)
+    return learned, True
+
+
+def correct_food_nutrition(conn: sqlite3.Connection, argument: str) -> str:
+    """Show or overwrite the nutrition values of a catalog food.
+
+    Usage: 'jidlo <nazev>' to inspect, 'jidlo <nazev> <kcal> <B> <S> <T>' to overwrite.
+    """
+    tokens = argument.split()
+    if not tokens:
+        return "Použití: jidlo <nazev> [<kcal> <bilkoviny> <sacharidy> <tuky>]"
+
+    numbers: list[float] = []
+    while tokens and len(numbers) < 4:
+        try:
+            numbers.insert(0, float(tokens[-1].replace(",", ".")))
+        except ValueError:
+            break
+        tokens.pop()
+
+    name = " ".join(tokens).strip()
+    if not name:
+        return "Chybí název potraviny. Použití: jidlo <nazev> [<kcal> <B> <S> <T>]"
+
+    existing = get_food(conn, name)
+    if existing is None:
+        return (
+            f"Potravina '{name}' není v katalogu. "
+            "Nejdřív ji zaznamenej v jídle, pak ji můžeš opravit."
+        )
+
+    if not numbers:
+        source = "AI odhad" if existing.source == "ai" else "kurátorovaný katalog"
+        return (
+            f"{existing.name} ({source}), hodnoty na 100 g:\n"
+            f"- Energie: {existing.calories:.1f} kcal\n"
+            f"- Bílkoviny: {existing.protein:.2f} g\n"
+            f"- Sacharidy: {existing.carbs:.2f} g\n"
+            f"- Tuky: {existing.fats:.2f} g\n"
+            f"- DIAAS koeficient: {existing.diaas_coefficient:.2f}\n"
+            f"Oprava: jidlo {existing.name} <kcal> <bilkoviny> <sacharidy> <tuky>"
+        )
+
+    if len(numbers) != 4:
+        return (
+            "Pro opravu zadej všechny čtyři hodnoty: "
+            f"jidlo {existing.name} <kcal> <bilkoviny> <sacharidy> <tuky>"
+        )
+
+    calories, protein, carbs, fats = numbers
+    if min(numbers) < 0:
+        return "Hodnoty nesmí být záporné."
+
+    updated = update_food_nutrition(conn, existing.name, calories, protein, carbs, fats)
+    return (
+        f"Opraveno: {updated.name} na 100 g:\n"
+        f"- Energie: {updated.calories:.1f} kcal\n"
+        f"- Bílkoviny: {updated.protein:.2f} g\n"
+        f"- Sacharidy: {updated.carbs:.2f} g\n"
+        f"- Tuky: {updated.fats:.2f} g\n"
+        "Už zaznamenané dny se nepřepočítávají."
+    )
+
+
 def format_history(conn: sqlite3.Connection, limit: int = 10) -> str:
     """Format recent food and weight logs."""
     food_logs = get_recent_food_logs(conn, limit=limit)
@@ -75,9 +166,10 @@ def format_history(conn: sqlite3.Connection, limit: int = 10) -> str:
         lines.append(f"\nPoslední jídla (posledních {len(food_logs)}):")
         for item in food_logs:
             time_part = item.logged_at[:16].replace("T", " ")
+            ai_flag = " [AI odhad]" if item.nutrition_source == "ai" else ""
             lines.append(
                 f"- {time_part} | {item.food_name_matched} ({item.amount_g:.0f} g, {item.state}) | "
-                f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS"
+                f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS{ai_flag}"
             )
 
     if weight_logs:
@@ -166,6 +258,11 @@ def handle_user_message(
             return str(exc)
         return delete_day(conn, day)
 
+    if first_token in ("jidlo", "jídlo", "potravina", "food"):
+        if len(parts) < 2:
+            return "Použití: jidlo <nazev> [<kcal> <bilkoviny> <sacharidy> <tuky>]"
+        return correct_food_nutrition(conn, parts[1])
+
     # 2. Timeframe reporting commands
     if command_lower in ("dnes", "prehled", "přehled", "dnesek", "summary", "today"):
         return generate_period_report(conn, "denni")
@@ -221,11 +318,19 @@ def handle_user_message(
             return "Chyba: Záznam jídla neobsahuje žádné položky."
 
         calculated_items = []
+        learned_names: list[str] = []
         for item in user_log.items:
             try:
-                food_def, _ = find_matching_food(item.name, foods)
+                food_def, was_learned = resolve_food(conn, item.name, foods)
             except FoodNotFoundError as exc:
                 return f"Chyba: {exc}"
+            except (ValueError, RuntimeError) as exc:
+                return f"Chyba: {exc}"
+
+            if was_learned:
+                # Keep the in-memory catalog in sync for the remaining items.
+                foods.append(food_def)
+                learned_names.append(food_def.name)
 
             calculated = calculate_food_log(item, food_def, clean_input)
             calculated_items.append(calculated)
@@ -234,13 +339,33 @@ def handle_user_message(
 
         lines = ["Zaznamenáno jídlo:"]
         for item in calculated_items:
-            est_flag = " (odhad)" if item.is_estimated else ""
+            est_flag = " (odhad množství)" if item.is_estimated else ""
+            ai_flag = " [AI odhad maker]" if item.nutrition_source == "ai" else ""
             state_flag = f" ({item.state})" if item.state == "cooked" else ""
             lines.append(
                 f"- {item.food_name_matched} ({item.amount_g:.0f} g{state_flag}{est_flag}): "
                 f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS "
                 f"(celkem {item.protein_raw:.1f} g) | Sacharidy: {item.carbs:.1f} g | "
-                f"Tuky: {item.fats:.1f} g"
+                f"Tuky: {item.fats:.1f} g{ai_flag}"
+            )
+
+        if learned_names:
+            lines.append("---")
+            lines.append(
+                "Tyto potraviny nebyly v katalogu, takže je model odhadl a uložil "
+                "jako odhad (příště se použijí stejné hodnoty):"
+            )
+            for name in learned_names:
+                stored = get_food(conn, name)
+                if stored is not None:
+                    lines.append(
+                        f"- {stored.name}: {stored.calories:.0f} kcal, "
+                        f"{stored.protein:.1f} g bílkovin, {stored.carbs:.1f} g sacharidů, "
+                        f"{stored.fats:.1f} g tuků na 100 g"
+                    )
+            lines.append(
+                "Hodnoty jde opravit příkazem: "
+                f"jidlo {' | '.join(learned_names[:1])} <kcal> <bilkoviny> <sacharidy> <tuky>"
             )
 
         today_prefix = datetime.now().strftime("%Y-%m-%d")
@@ -476,7 +601,8 @@ def main() -> None:
 
     init_db(settings.database_path)
     conn = get_connection(settings.database_path)
-    foods = load_foods_from_json(settings.foods_data_path)
+    ensure_food_catalog(conn, settings.foods_data_path)
+    foods = load_foods(conn)
 
     try:
         if args.goal:

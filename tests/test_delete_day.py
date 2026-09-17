@@ -2,6 +2,7 @@
 
 import sqlite3
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -30,6 +31,30 @@ def _today() -> str:
 
 def _yesterday() -> str:
     return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+# Sandbox restricts the OS temp directory, so isolated test databases live in the workspace.
+TEST_DB_DIR = Path(__file__).resolve().parent.parent / ".tmp" / "tests"
+
+
+@pytest.fixture
+def temp_settings_db():
+    """Settings pointing at an isolated database instead of the real one."""
+    from nutrition_agent.config import settings as real_settings
+
+    TEST_DB_DIR.mkdir(parents=True, exist_ok=True)
+    return type(real_settings)(
+        database_path=TEST_DB_DIR / "delete_day_cli.db",
+        foods_data_path=real_settings.foods_data_path,
+        log_level="WARNING",
+        gemini_api_key=None,
+        discord_bot_token=None,
+        discord_guild_id=None,
+        web_host="127.0.0.1",
+        web_port=8000,
+        target_calories=None,
+        target_protein_g=None,
+    )
 
 
 @pytest.fixture
@@ -237,7 +262,7 @@ def test_cli_delete_day_command_invalid_date_fails_fast(two_day_db: sqlite3.Conn
     assert count_day_logs(two_day_db, "2026-09-15") == {"food": 1, "weight": 1, "workout": 1}
 
 
-def test_cli_delete_day_flag_routing(monkeypatch: pytest.MonkeyPatch):
+def test_cli_delete_day_flag_routing(monkeypatch: pytest.MonkeyPatch, temp_settings_db):
     """--delete-day forwards the date and defaults to today without a value."""
     import nutrition_agent.cli as cli_module
 
@@ -248,6 +273,7 @@ def test_cli_delete_day_flag_routing(monkeypatch: pytest.MonkeyPatch):
         return f"smazano {day}"
 
     monkeypatch.setattr(cli_module, "delete_day", fake_delete_day)
+    monkeypatch.setattr(cli_module, "settings", temp_settings_db)
 
     for argv, expected in (
         (["--delete-day", "2026-09-15"], "2026-09-15"),

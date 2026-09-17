@@ -3,6 +3,8 @@
 import sqlite3
 from pathlib import Path
 
+from nutrition_agent.models import food_name_key
+
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS food_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,7 +18,8 @@ CREATE TABLE IF NOT EXISTS food_logs (
     protein_raw REAL NOT NULL,
     protein_usable REAL NOT NULL,
     carbs REAL NOT NULL,
-    fats REAL NOT NULL
+    fats REAL NOT NULL,
+    nutrition_source TEXT NOT NULL DEFAULT 'curated'
 );
 
 CREATE INDEX IF NOT EXISTS idx_food_logs_logged_at ON food_logs(logged_at);
@@ -47,7 +50,45 @@ CREATE TABLE IF NOT EXISTS workout_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_workout_logs_logged_at ON workout_logs(logged_at);
+
+CREATE TABLE IF NOT EXISTS foods (
+    name TEXT PRIMARY KEY,
+    name_key TEXT NOT NULL UNIQUE,
+    calories REAL NOT NULL,
+    protein REAL NOT NULL,
+    diaas_coefficient REAL NOT NULL,
+    carbs REAL NOT NULL,
+    fats REAL NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('curated', 'ai')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_foods_source ON foods(source);
 """
+
+# Kept separate so the migration can rebuild the table with the same definition.
+FOODS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS foods (
+    name TEXT PRIMARY KEY,
+    name_key TEXT NOT NULL UNIQUE,
+    calories REAL NOT NULL,
+    protein REAL NOT NULL,
+    diaas_coefficient REAL NOT NULL,
+    carbs REAL NOT NULL,
+    fats REAL NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('curated', 'ai')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_foods_source ON foods(source);
+"""
+
+# Columns added after the first release, applied to databases created by older versions.
+COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("food_logs", "nutrition_source", "TEXT NOT NULL DEFAULT 'curated'"),
+)
 
 
 def get_connection(db_path: str | Path) -> sqlite3.Connection:
@@ -62,7 +103,75 @@ def get_connection(db_path: str | Path) -> sqlite3.Connection:
     return conn
 
 
+def _existing_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """Return the column names currently present in a table."""
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """Report whether a table exists in the database."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+    ).fetchone()
+    return row is not None
+
+
+def _apply_column_migrations(conn: sqlite3.Connection) -> None:
+    """Add columns that older database files are missing."""
+    for table, column, definition in COLUMN_MIGRATIONS:
+        if _table_exists(conn, table) and column not in _existing_columns(conn, table):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+def _migrate_foods_lookup_key(conn: sqlite3.Connection) -> None:
+    """Rebuild the foods table when it predates the normalized name_key column.
+
+    A UNIQUE NOT NULL column cannot be added in place, so the table is rebuilt.
+    Keys are recomputed in Python because SQLite's lower() is ASCII-only.
+    """
+    if not _table_exists(conn, "foods") or "name_key" in _existing_columns(conn, "foods"):
+        return
+
+    legacy_rows = conn.execute(
+        """
+        SELECT name, calories, protein, diaas_coefficient, carbs, fats, source,
+               created_at, updated_at
+        FROM foods
+        """
+    ).fetchall()
+
+    conn.execute("ALTER TABLE foods RENAME TO foods_legacy")
+    conn.executescript(FOODS_TABLE_SQL)
+
+    for row in legacy_rows:
+        conn.execute(
+            """
+            INSERT INTO foods
+                (name, name_key, calories, protein, diaas_coefficient, carbs, fats,
+                 source, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name_key) DO NOTHING
+            """,
+            (
+                row["name"],
+                food_name_key(row["name"]),
+                row["calories"],
+                row["protein"],
+                row["diaas_coefficient"],
+                row["carbs"],
+                row["fats"],
+                row["source"],
+                row["created_at"],
+                row["updated_at"],
+            ),
+        )
+
+    conn.execute("DROP TABLE foods_legacy")
+
+
 def init_db(db_path: str | Path) -> None:
-    """Initialize SQLite database tables and indices."""
+    """Initialize SQLite tables, indices and pending migrations."""
     with get_connection(db_path) as conn:
+        _migrate_foods_lookup_key(conn)
         conn.executescript(SCHEMA_SQL)
+        _apply_column_migrations(conn)

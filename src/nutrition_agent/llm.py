@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 from nutrition_agent.config import settings
-from nutrition_agent.models import UserLog
+from nutrition_agent.models import EstimatedFoodNutrition, UserLog
 
 SYSTEM_INSTRUCTION = """Jsi striktní parser uživatelských zpráv o stravě a tělesné hmotnosti.
 Tvým jediným úkolem je extrahovat entity a vrátit je v JSON podle schématu UserLog.
@@ -131,3 +131,72 @@ def parse_user_message(
         log_type="INVALID",
         error_reason="Model nevrátil žádná data.",
     )
+
+
+NUTRITION_ESTIMATE_INSTRUCTION = """Jsi nutriční databáze. Uživatel zadal potravinu, která není
+v jeho lokálním katalogu. Odhadni její nutriční hodnoty na 100 g v syrovém / suchém stavu.
+
+Pravidla:
+1. Vrátíš pouze JSON podle schématu EstimatedFoodNutrition.
+2. Hodnoty uváděj na 100 g. U tekutin na 100 ml.
+3. Vycházej z typických hodnot dané potraviny. Pokud jde o hotové jídlo, uváděj hodnoty
+   hotového jídla tak, jak se jí.
+4. Kategorie bílkovin (protein_category):
+   - 'animal': maso, ryby, vejce, mléčné výrobky, syrovátkový protein
+   - 'plant_isolate': sójový nebo hrachový izolát, tofu
+   - 'legumes': čočka, fazole, cizrna
+   - 'grains_seeds': obiloviny, rýže, těstoviny, chléb, semena
+   - 'nuts_peanuts': ořechy a arašídy
+   - 'unknown': pokud si kategorií nejsi jistý
+5. Energetická bilance musí odpovídat: kcal ≈ bílkoviny*4 + sacharidy*4 + tuky*9.
+6. Pokud potravinu neznáš nebo je nesmyslná, vrať nuly a protein_category 'unknown'.
+7. Zákaz jakéhokoliv textu mimo JSON.
+
+Příklady:
+Vstup: "kuřecí kari"
+Výstup: {"name": "kuřecí kari", "calories": 130, "protein": 12, "carbs": 6, "fats": 6,
+         "protein_category": "animal"}
+
+Vstup: "quinoa"
+Výstup: {"name": "quinoa", "calories": 368, "protein": 14, "carbs": 64, "fats": 6,
+         "protein_category": "grains_seeds"}
+"""
+
+
+def estimate_food_nutrition(
+    food_name: str,
+    client: genai.Client | None = None,
+    model: str = "gemini-3.6-flash",
+) -> EstimatedFoodNutrition:
+    """Ask the model for nutrition values of a food missing from the local catalog.
+
+    The result is an estimate, never a measurement. Callers must store and display
+    it as such. This function performs no calculations and writes nothing.
+    """
+    clean_name = food_name.strip()
+    if not clean_name:
+        raise ValueError("Nelze odhadnout nutriční hodnoty pro prázdný název potraviny.")
+
+    active_client = client or create_gemini_client()
+
+    config = types.GenerateContentConfig(
+        system_instruction=NUTRITION_ESTIMATE_INSTRUCTION,
+        response_mime_type="application/json",
+        response_schema=EstimatedFoodNutrition,
+        temperature=0.0,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+    response = active_client.models.generate_content(
+        model=model,
+        contents=clean_name,
+        config=config,
+    )
+
+    if isinstance(response.parsed, EstimatedFoodNutrition):
+        return response.parsed
+
+    if response.text:
+        return EstimatedFoodNutrition.model_validate_json(response.text)
+
+    raise ValueError(f"Model nevrátil odhad pro potravinu '{food_name}'.")

@@ -112,28 +112,153 @@ def test_handle_food_log_diaas_calculation(
     assert rows[0]["protein_usable"] == 9.45
 
 
-def test_handle_unknown_food_fails_cleanly(
+def test_handle_unknown_food_learns_from_estimate(
     test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Unknown food returns error prompt without saving to DB."""
+    """A food missing from the catalog is estimated by the model and stored."""
+    import nutrition_agent.cli as cli_module
+    from nutrition_agent.models import EstimatedFoodNutrition
+    from nutrition_agent.repository import get_food
+
     conn, foods = test_setup
+
+    def fake_estimate(name: str, **kwargs) -> EstimatedFoodNutrition:
+        assert name == "kuřecí kari"
+        return EstimatedFoodNutrition(
+            name="kuřecí kari",
+            calories=130.0,
+            protein=12.0,
+            carbs=6.0,
+            fats=6.0,
+            protein_category="animal",
+        )
+
+    monkeypatch.setattr(cli_module, "estimate_food_nutrition", fake_estimate)
 
     def mock_parser(msg: str) -> UserLog:
         return UserLog(
             log_type="FOOD",
             items=[
                 ExtractedFoodItem(
-                    name="neznámá věc xyz",
-                    amount=100.0,
+                    name="kuřecí kari",
+                    amount=250.0,
                     unit="g",
-                    state="raw",
+                    state="cooked",
                     is_estimated=False,
                 )
             ],
         )
 
-    result = handle_user_message("100g neznámá věc xyz", foods, conn, parse_fn=mock_parser)
-    assert "Chyba: Surovina 'neznámá věc xyz' nebyla nalezena v databázi" in result
+    result = handle_user_message("250g kuřecího kari", foods, conn, parse_fn=mock_parser)
+
+    assert "AI odhad maker" in result
+    assert "nebyly v katalogu" in result
+    assert "kuřecí kari" in result
+
+    # The food is now part of the catalog, flagged as an AI estimate
+    stored = get_food(conn, "kuřecí kari")
+    assert stored is not None
+    assert stored.source == "ai"
+    assert stored.calories == 130.0
+    assert stored.diaas_coefficient == 1.00  # animal category
+
+    # And the log records where its numbers came from
+    cursor = conn.cursor()
+    cursor.execute("SELECT nutrition_source, food_name_matched FROM food_logs")
+    row = cursor.fetchone()
+    assert row["nutrition_source"] == "ai"
+    assert row["food_name_matched"] == "kuřecí kari"
+
+
+def test_learned_food_is_reused_without_asking_model_again(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Once learned, the food matches locally and the model is not called again."""
+    import nutrition_agent.cli as cli_module
+    from nutrition_agent.models import EstimatedFoodNutrition
+    from nutrition_agent.repository import load_foods
+
+    conn, foods = test_setup
+    calls: list[str] = []
+
+    def fake_estimate(name: str, **kwargs) -> EstimatedFoodNutrition:
+        calls.append(name)
+        return EstimatedFoodNutrition(
+            name="quinoa",
+            calories=368.0,
+            protein=14.0,
+            carbs=64.0,
+            fats=6.0,
+            protein_category="grains_seeds",
+        )
+
+    monkeypatch.setattr(cli_module, "estimate_food_nutrition", fake_estimate)
+
+    def mock_parser(msg: str) -> UserLog:
+        return UserLog(
+            log_type="FOOD",
+            items=[
+                ExtractedFoodItem(name="quinoa", amount=100.0, unit="g", state="raw"),
+            ],
+        )
+
+    handle_user_message("100g quinoa", foods, conn, parse_fn=mock_parser)
+    assert calls == ["quinoa"]
+
+    # Second log against a freshly loaded catalog must not hit the model again
+    reloaded = load_foods(conn)
+    handle_user_message("100g quinoa", reloaded, conn, parse_fn=mock_parser)
+    assert calls == ["quinoa"]
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM food_logs")
+    assert cursor.fetchone()[0] == 2
+
+
+def test_curated_catalog_wins_over_ai_estimate(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """A known curated food never reaches the estimator."""
+    from nutrition_agent.cli import resolve_food
+
+    conn, foods = test_setup
+    food_def, was_learned = resolve_food(conn, "kuřecí prsa", foods)
+
+    assert was_learned is False
+    assert food_def.source == "curated"
+    assert food_def.name == "Kuřecí prsa"
+
+
+def test_estimator_failure_is_reported_and_saves_nothing(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the model cannot estimate, the message fails without writing data."""
+    import nutrition_agent.cli as cli_module
+
+    conn, foods = test_setup
+
+    def failing_estimate(name: str, **kwargs):
+        raise RuntimeError("Model nevrátil odhad.")
+
+    monkeypatch.setattr(cli_module, "estimate_food_nutrition", failing_estimate)
+
+    def mock_parser(msg: str) -> UserLog:
+        return UserLog(
+            log_type="FOOD",
+            items=[ExtractedFoodItem(name="záhadná věc", amount=100.0, unit="g", state="raw")],
+        )
+
+    result = handle_user_message("100g záhadná věc", foods, conn, parse_fn=mock_parser)
+    assert result.startswith("Chyba:")
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM food_logs")
+    assert cursor.fetchone()[0] == 0
+    cursor.execute("SELECT COUNT(*) FROM foods")
+    assert cursor.fetchone()[0] == 0
 
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM food_logs")

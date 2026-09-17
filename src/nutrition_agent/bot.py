@@ -22,11 +22,12 @@ from nutrition_agent.reporting import generate_period_report
 from nutrition_agent.repository import (
     count_day_logs,
     delete_day_logs,
+    ensure_food_catalog,
     get_daily_food_logs,
     get_daily_weight_comparison,
     get_daily_workout_log,
     get_user_profile,
-    load_foods_from_json,
+    load_foods,
     save_weight_log,
     save_workout_log,
     set_user_setting,
@@ -160,7 +161,8 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
         logger.info("Prijata zprava od %s: %s", message.author, clean_text[:80])
 
         conn = get_connection(settings.database_path)
-        foods = load_foods_from_json(settings.foods_data_path)
+        ensure_food_catalog(conn, settings.foods_data_path)
+        foods = load_foods(conn)
 
         try:
             reply = handle_user_message(clean_text, foods, conn)
