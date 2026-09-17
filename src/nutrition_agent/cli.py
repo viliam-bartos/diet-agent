@@ -14,6 +14,7 @@ from nutrition_agent.models import (
     FoodDefinition,
     FoodNotFoundError,
     WeightValidationError,
+    parse_date_argument,
 )
 from nutrition_agent.nutrition import (
     calculate_food_log,
@@ -22,6 +23,8 @@ from nutrition_agent.nutrition import (
 )
 from nutrition_agent.reporting import format_daily_target_breakdown, generate_period_report
 from nutrition_agent.repository import (
+    DAY_LOG_LABELS,
+    delete_day_logs,
     get_daily_food_logs,
     get_recent_food_logs,
     get_recent_weight_logs,
@@ -38,6 +41,24 @@ from nutrition_agent.targets import (
     parse_day_type,
     parse_goal,
 )
+
+
+def format_day_counts(counts: dict[str, int]) -> str:
+    """Format per-type record counts as a bullet list."""
+    return "\n".join(f"- {label}: {counts.get(key, 0)}" for key, label in DAY_LOG_LABELS.items())
+
+
+def delete_day(conn: sqlite3.Connection, day: str) -> str:
+    """Delete every record for a day and describe what was removed."""
+    deleted = delete_day_logs(conn, day)
+    total = sum(deleted.values())
+
+    if total == 0:
+        return f"Pro den {day} nebyly nalezeny žádné záznamy."
+
+    lines = [f"Vymazány záznamy pro den {day}:", format_day_counts(deleted)]
+    lines.append(f"Celkem smazáno {total} záznamů.")
+    return "\n".join(lines)
 
 
 def format_history(conn: sqlite3.Connection, limit: int = 10) -> str:
@@ -136,6 +157,14 @@ def handle_user_message(
             f"Zaznamenán trénink: {clean_desc}{dur_info}.\n"
             "Typ dne byl automaticky nastaven na TRAINING."
         )
+
+    if first_token in ("vymaz", "vymaž", "smaz", "smaž", "delete"):
+        raw_day = parts[1] if len(parts) > 1 else None
+        try:
+            day = parse_date_argument(raw_day)
+        except ValueError as exc:
+            return str(exc)
+        return delete_day(conn, day)
 
     # 2. Timeframe reporting commands
     if command_lower in ("dnes", "prehled", "přehled", "dnesek", "summary", "today"):
@@ -400,6 +429,15 @@ def main() -> None:
         help="Zobrazit posledních N záznamů (výchozí 10)",
     )
     parser.add_argument(
+        "--delete-day",
+        "--vymaz-den",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="DATUM",
+        help="Vymazat všechny záznamy za den (RRRR-MM-DD, 'dnes' nebo 'vcera')",
+    )
+    parser.add_argument(
         "--web",
         action="store_true",
         help="Spustit webový dashboard server",
@@ -451,7 +489,14 @@ def main() -> None:
             set_user_setting(conn, "day_type", day_type.value)
             print(f"Typ dne nastaven na: {day_type.value}")
 
-        if args.today:
+        if args.delete_day is not None:
+            try:
+                day = parse_date_argument(args.delete_day)
+            except ValueError as exc:
+                print(str(exc))
+            else:
+                print(delete_day(conn, day))
+        elif args.today:
             print(generate_period_report(conn, "denni"))
         elif args.week:
             print(generate_period_report(conn, "tydenni"))

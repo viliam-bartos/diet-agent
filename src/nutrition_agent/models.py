@@ -1,7 +1,7 @@
 """Data models, schemas, and custom exceptions for Nutrition Agent."""
 
 import contextlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Literal
 
@@ -16,6 +16,29 @@ MIN_FOOD_MATCH_SCORE: float = 75.0
 def utc_now_iso() -> str:
     """Return current UTC timestamp in ISO 8601 format."""
     return datetime.now(UTC).isoformat()
+
+
+def parse_date_argument(value: str | None) -> str:
+    """Resolve an optional day argument into a 'YYYY-MM-DD' string.
+
+    Accepts 'YYYY-MM-DD', the words 'dnes'/'today' and 'vcera'/'yesterday'.
+    An empty or missing value means today.
+    """
+    if value is None or not value.strip():
+        return datetime.now().strftime("%Y-%m-%d")
+
+    cleaned = value.strip().lower()
+    if cleaned in ("dnes", "dnesek", "today"):
+        return datetime.now().strftime("%Y-%m-%d")
+    if cleaned in ("vcera", "včera", "yesterday"):
+        return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    try:
+        return datetime.strptime(cleaned, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(
+            f"Neplatné datum '{value}'. Použij formát RRRR-MM-DD, 'dnes' nebo 'vcera'."
+        ) from exc
 
 
 class FoodNotFoundError(Exception):

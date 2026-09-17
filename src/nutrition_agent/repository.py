@@ -774,3 +774,47 @@ def get_unified_records(
     total_count = len(records)
     paginated = records[offset : offset + limit]
     return paginated, total_count
+
+
+# Table names are fixed constants, never user input.
+DAY_LOG_TABLES: dict[str, str] = {
+    "food": "food_logs",
+    "weight": "weight_logs",
+    "workout": "workout_logs",
+}
+
+DAY_LOG_LABELS: dict[str, str] = {
+    "food": "Jídla",
+    "weight": "Vážení",
+    "workout": "Tréninky",
+}
+
+
+def count_day_logs(conn: sqlite3.Connection, date_prefix: str) -> dict[str, int]:
+    """Count food, weight and workout records for a given day."""
+    cursor = conn.cursor()
+    counts: dict[str, int] = {}
+    for key, table in DAY_LOG_TABLES.items():
+        cursor.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE logged_at LIKE ? || '%'",
+            (date_prefix,),
+        )
+        counts[key] = int(cursor.fetchone()[0])
+    return counts
+
+
+def delete_day_logs(conn: sqlite3.Connection, date_prefix: str) -> dict[str, int]:
+    """Delete every food, weight and workout record for a given day.
+
+    Returns the number of deleted rows per record type.
+    """
+    cursor = conn.cursor()
+    deleted: dict[str, int] = {}
+    for key, table in DAY_LOG_TABLES.items():
+        cursor.execute(
+            f"DELETE FROM {table} WHERE logged_at LIKE ? || '%'",
+            (date_prefix,),
+        )
+        deleted[key] = int(cursor.rowcount)
+    conn.commit()
+    return deleted

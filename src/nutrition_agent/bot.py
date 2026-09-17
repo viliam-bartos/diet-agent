@@ -8,13 +8,20 @@ from datetime import datetime
 import discord
 from discord import app_commands
 
-from nutrition_agent.cli import handle_user_message
+from nutrition_agent.cli import format_day_counts, handle_user_message
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
-from nutrition_agent.models import CalculatedWeightLog, CalculatedWorkoutLog, WeightValidationError
+from nutrition_agent.models import (
+    CalculatedWeightLog,
+    CalculatedWorkoutLog,
+    WeightValidationError,
+    parse_date_argument,
+)
 from nutrition_agent.nutrition import validate_body_weight
 from nutrition_agent.reporting import generate_period_report
 from nutrition_agent.repository import (
+    count_day_logs,
+    delete_day_logs,
     get_daily_food_logs,
     get_daily_weight_comparison,
     get_daily_workout_log,
@@ -59,6 +66,38 @@ def build_dashboard_view() -> discord.ui.View:
     )
     view.add_item(button)
     return view
+
+
+class ConfirmDeleteDayView(discord.ui.View):
+    """Two-button confirmation for an irreversible day deletion."""
+
+    def __init__(self, day: str) -> None:
+        super().__init__(timeout=60)
+        self.day = day
+
+    async def _close(self, interaction: discord.Interaction, message: str) -> None:
+        for child in self.children:
+            child.disabled = True
+        self.stop()
+        await interaction.response.edit_message(content=message, embed=None, view=self)
+
+    @discord.ui.button(label="Vymazat", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        conn = get_connection(settings.database_path)
+        try:
+            deleted = delete_day_logs(conn, self.day)
+        finally:
+            conn.close()
+
+        await self._close(
+            interaction,
+            f"Vymazáno pro den {self.day} (celkem {sum(deleted.values())} záznamů):\n"
+            f"{format_day_counts(deleted)}",
+        )
+
+    @discord.ui.button(label="Zrušit", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._close(interaction, f"Vymazání dne {self.day} zrušeno.")
 
 
 def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
@@ -304,6 +343,41 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
             await interaction.response.send_message(embed=embed, view=build_dashboard_view())
         finally:
             conn.close()
+
+    @tree.command(name="vymaz", description="Vymaže všechny záznamy za zvolený den")
+    @app_commands.describe(datum="Datum RRRR-MM-DD, 'dnes' nebo 'vcera' (výchozí dnes)")
+    async def cmd_delete_day(interaction: discord.Interaction, datum: str = ""):
+        try:
+            day = parse_date_argument(datum)
+        except ValueError as exc:
+            await interaction.response.send_message(f"Chyba: {exc}", ephemeral=True)
+            return
+
+        conn = get_connection(settings.database_path)
+        try:
+            counts = count_day_logs(conn, day)
+        finally:
+            conn.close()
+
+        if sum(counts.values()) == 0:
+            await interaction.response.send_message(
+                f"Pro den {day} nebyly nalezeny žádné záznamy.", ephemeral=True
+            )
+            return
+
+        embed = discord.Embed(
+            title=f"Vymazat den {day}?",
+            description=(
+                f"Tato akce nevratně smaže všechny záznamy za den {day}.\n\n"
+                f"```text\n{format_day_counts(counts)}\n```"
+            ),
+            color=discord.Color.orange(),
+        )
+        await interaction.response.send_message(
+            embed=embed,
+            view=ConfirmDeleteDayView(day),
+            ephemeral=True,
+        )
 
     @tree.command(name="web", description="Přímý odkaz na webový dashboard")
     async def cmd_web(interaction: discord.Interaction):

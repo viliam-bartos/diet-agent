@@ -115,6 +115,7 @@ Příklady vstupů:
 - `cil bulk`, `cil maintenance`, `cil cut` pro změnu aktivního stavu
 - `den trenink` nebo `den odpocinek` pro přepnutí tréninkového stavu
 - `historie` pro zobrazení posledních záznamů
+- `vymaz` pro smazání dnešních záznamů, `vymaz vcera` nebo `vymaz 2026-09-15` pro jiný den
 
 Ukončení interaktivního režimu zadáním `konec`, `exit` nebo `quit`.
 
@@ -145,6 +146,15 @@ Zobrazení historie posledních N záznamů:
 ```bash
 nutrition-agent --history 10
 ```
+
+Smazání všech záznamů za den:
+```bash
+nutrition-agent --delete-day             # Dnešní den
+nutrition-agent --delete-day vcera       # Včerejšek
+nutrition-agent --delete-day 2026-09-15  # Konkrétní datum
+```
+
+Mazání se týká jídel, vážení i tréninků daného dne. Uživatelský profil (cíl, typ dne) zůstává nedotčený. Neplatné datum se odmítne a nesmaže se nic.
 
 ### Služby (web a Discord bot)
 
@@ -194,6 +204,7 @@ Zpráva v DM nebo ve vyhrazeném kanálu (např. `200g kuřecích prsou a 150g r
 | `/vaha <hodnota>` | Okamžitý záznam hmotnosti s validací a automatickým přepočtem cílů. |
 | `/trenink [typ] [delka_min] [poznamka]` | Rychlý záznam tréninku a přepnutí typu dne na TRAINING. |
 | `/prehled <obdobi>` | Textová tabulka za období (`tyden`, `mesic`, `pulrok`, `rok`, `vse`). |
+| `/vymaz [datum]` | Smaže všechny záznamy za den (`dnes`, `vcera` nebo `RRRR-MM-DD`). Před smazáním zobrazí, co se odstraní, a vyžádá potvrzení tlačítkem. |
 | `/web` | Přímý odkaz na webový dashboard. |
 
 Progress bary v Discordu používají Unicode bloky:
