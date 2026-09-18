@@ -219,6 +219,29 @@
     .kpi-subtext.positive { color: #1e7e34; }
     .kpi-subtext.negative { color: #b21f2d; }
 
+    .kpi-bar {
+      height: 6px;
+      background: var(--bg-cardboard);
+      border: 1px solid rgba(24, 24, 26, 0.25);
+      margin: 10px 0 8px;
+      overflow: hidden;
+    }
+
+    .kpi-bar-fill {
+      height: 100%;
+      width: 0;
+      background: var(--valve-orange);
+      transition: width 0.25s ease-out;
+    }
+
+    .kpi-bar-fill.over {
+      background: var(--aperture-cyan);
+    }
+
+    .kpi-bar-fill.empty {
+      background: var(--ink-muted);
+    }
+
     /* Section layout */
     .dashboard-section {
       background: var(--bg-sheet);
@@ -548,24 +571,28 @@
     <!-- KPI Cards -->
     <div class="kpi-grid">
       <div class="kpi-card">
-        <div class="kpi-label">Aktuální tělesná váha</div>
-        <div class="kpi-value"><span id="kpiWeight">--</span> <span class="kpi-unit">kg</span></div>
-        <div class="kpi-subtext" id="kpiWeightDelta">-- za zvolené období</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">Průměrné kalorie / den</div>
+        <div class="kpi-label">Kalorie / den</div>
         <div class="kpi-value"><span id="kpiCals">--</span> <span class="kpi-unit">kcal</span></div>
-        <div class="kpi-subtext" id="kpiCalsTarget">Cíl: -- kcal</div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiCalsBar"></div></div>
+        <div class="kpi-subtext" id="kpiCalsTarget">Cíl: --</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Průměrné DIAAS bílkoviny</div>
+        <div class="kpi-label">Bílkoviny / den</div>
         <div class="kpi-value"><span id="kpiProtein">--</span> <span class="kpi-unit">g</span></div>
-        <div class="kpi-subtext" id="kpiProteinTarget">Cíl: -- g DIAAS</div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiProteinBar"></div></div>
+        <div class="kpi-subtext" id="kpiProteinTarget">Cíl: --</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Odtrénované dny</div>
-        <div class="kpi-value"><span id="kpiWorkouts">--</span> <span class="kpi-unit">dní</span></div>
-        <div class="kpi-subtext" id="kpiDaysTotal">Z celkem -- dní stravy</div>
+        <div class="kpi-label">Sacharidy / den</div>
+        <div class="kpi-value"><span id="kpiCarbs">--</span> <span class="kpi-unit">g</span></div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiCarbsBar"></div></div>
+        <div class="kpi-subtext" id="kpiCarbsTarget">Cíl: --</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Tuky / den</div>
+        <div class="kpi-value"><span id="kpiFats">--</span> <span class="kpi-unit">g</span></div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiFatsBar"></div></div>
+        <div class="kpi-subtext" id="kpiFatsTarget">Cíl: --</div>
       </div>
     </div>
 
@@ -573,7 +600,11 @@
     <div class="dashboard-section">
       <div class="section-header">
         <div class="section-title">Vývoj tělesné hmotnosti</div>
+        <div class="kpi-value" style="margin: 0; font-size: 22px;">
+          <span id="kpiWeight">--</span> <span class="kpi-unit">kg</span>
+        </div>
       </div>
+      <div class="kpi-subtext" id="kpiWeightDelta" style="margin-top: -8px; margin-bottom: 12px;"></div>
       <div style="height: 320px; width: 100%;">
         <canvas id="weightChart"></canvas>
       </div>
@@ -676,6 +707,31 @@
       loadRecords();
     }
 
+    function renderMacroCard(valueId, barId, targetId, average, target, unit, decimals) {
+      const shown = average != null ? average.toFixed(decimals) : '--';
+      document.getElementById(valueId).textContent = shown;
+
+      const bar = document.getElementById(barId);
+      const targetEl = document.getElementById(targetId);
+
+      if (!target || target <= 0) {
+        bar.style.width = '0%';
+        bar.className = 'kpi-bar-fill empty';
+        targetEl.textContent = 'Cíl: --';
+        return;
+      }
+
+      const percent = (average / target) * 100;
+      bar.style.width = `${Math.min(percent, 100)}%`;
+      bar.className = 'kpi-bar-fill' + (percent > 105 ? ' over' : '');
+
+      const diff = average - target;
+      const sign = diff >= 0 ? '+' : '';
+      targetEl.textContent =
+        `Cíl: ${target.toFixed(decimals)} ${unit} | ${percent.toFixed(0)} % (${sign}${diff.toFixed(decimals)})`;
+      targetEl.className = 'kpi-subtext';
+    }
+
     async function loadKpis() {
       try {
         const res = await fetch(`/api/kpis?period=${currentTimeframe}`);
@@ -687,21 +743,21 @@
         const deltaEl = document.getElementById('kpiWeightDelta');
         if (data.weight_delta != null) {
           const sign = data.weight_delta >= 0 ? '+' : '';
-          deltaEl.textContent = `${sign}${data.weight_delta.toFixed(1)} kg za období`;
+          deltaEl.textContent = `${sign}${data.weight_delta.toFixed(1)} kg za zvolené období`;
           deltaEl.className = 'kpi-subtext ' + (data.weight_delta >= 0 ? 'positive' : 'negative');
         } else {
-          deltaEl.textContent = 'Žádná delta váhy';
+          deltaEl.textContent = '';
           deltaEl.className = 'kpi-subtext';
         }
 
-        document.getElementById('kpiCals').textContent = data.avg_calories != null ? Math.round(data.avg_calories) : '--';
-        document.getElementById('kpiCalsTarget').textContent = `Cíl: ${Math.round(data.target_calories)} kcal`;
-
-        document.getElementById('kpiProtein').textContent = data.avg_protein_diaas != null ? data.avg_protein_diaas.toFixed(1) : '--';
-        document.getElementById('kpiProteinTarget').textContent = `Cíl: ${data.target_protein.toFixed(1)} g DIAAS`;
-
-        document.getElementById('kpiWorkouts').textContent = data.total_workout_days;
-        document.getElementById('kpiDaysTotal').textContent = `Z celkem ${data.total_food_days} dní se záznamem`;
+        renderMacroCard('kpiCals', 'kpiCalsBar', 'kpiCalsTarget',
+          data.avg_calories, data.target_calories, 'kcal', 0);
+        renderMacroCard('kpiProtein', 'kpiProteinBar', 'kpiProteinTarget',
+          data.avg_protein_diaas, data.target_protein, 'g DIAAS', 1);
+        renderMacroCard('kpiCarbs', 'kpiCarbsBar', 'kpiCarbsTarget',
+          data.avg_carbs, data.target_carbs, 'g', 1);
+        renderMacroCard('kpiFats', 'kpiFatsBar', 'kpiFatsTarget',
+          data.avg_fats, data.target_fats, 'g', 1);
       } catch (err) {
         console.error('Chyba při načítání KPI:', err);
       }

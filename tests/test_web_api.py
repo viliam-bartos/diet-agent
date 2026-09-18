@@ -172,12 +172,56 @@ def test_api_kpis_endpoint(api_client: TestClient):
     assert data["weight_delta"] == -0.8
     assert data["avg_calories"] == 212.0
     assert data["avg_protein_diaas"] == 46.0
+    assert data["avg_carbs"] == 0.0
+    assert data["avg_fats"] == 2.4
     assert data["total_workout_days"] == 1
     assert data["total_food_days"] == 5
     assert data["target_calories"] == 3150.0
     assert data["target_protein"] == 155.0
+    assert data["target_carbs"] == 430.0
+    assert data["target_fats"] == 82.5
     assert data["goal"] == "lean_bulk"
     assert data["day_type"] == "training"
+
+
+def test_api_kpis_averages_macros_per_logged_day(api_client: TestClient):
+    """Carb and fat averages are per logged day, like calories and protein."""
+    data = api_client.get("/api/kpis", params={"period": "30d"}).json()
+
+    # The fixture logs one identical meal on each of five days
+    assert data["avg_carbs"] == 0.0
+    assert data["avg_fats"] == 2.4
+    assert data["total_food_days"] == 5
+
+
+def test_dashboard_kpi_cards_show_macros_with_targets(api_client: TestClient):
+    """The header cards are the four macros, each with a goal line."""
+    body = api_client.get("/").text
+
+    for label in ("Kalorie / den", "Bílkoviny / den", "Sacharidy / den", "Tuky / den"):
+        assert label in body
+
+    for element in (
+        "kpiCals",
+        "kpiProtein",
+        "kpiCarbs",
+        "kpiFats",
+        "kpiCalsBar",
+        "kpiProteinBar",
+        "kpiCarbsBar",
+        "kpiFatsBar",
+        "kpiCalsTarget",
+        "kpiProteinTarget",
+        "kpiCarbsTarget",
+        "kpiFatsTarget",
+    ):
+        assert f'id="{element}"' in body
+
+    # The workout-days card is gone, the weight moved into the chart header
+    assert "Odtrénované dny" not in body
+    assert "kpiWorkouts" not in body
+    assert 'id="kpiWeight"' in body
+    assert 'id="kpiWeightDelta"' in body
 
 
 def test_api_weight_trend_endpoint(api_client: TestClient):

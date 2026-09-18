@@ -238,8 +238,8 @@ Parametr `period` přijímá `7d`, `30d`, `90d`, `180d`, `365d` a `all`.
 ### Komponenty dashboardu
 
 - **Přepínače časového rozsahu**: 7 dní, 30 dní, 3 měsíce, 6 měsíců, 1 rok, Vše.
-- **KPI karty**: aktuální váha s deltou za zvolené období, průměrný denní příjem kalorií a využitelných bílkovin (DIAAS), celkový počet odtrénovaných dní.
-- **Interaktivní graf váhy** (Chart.js): body jednotlivých vážení a spojitá čára 7denního klouzavého průměru.
+- **KPI karty**: průměrný denní příjem kalorií, bílkovin, sacharidů a tuků, každá s cílem, procentem plnění a pruhem.
+- **Interaktivní graf váhy** (Chart.js): body jednotlivých vážení a spojitá čára 7denního klouzavého průměru. Aktuální váha a její změna za období jsou v hlavičce sekce.
 - **Kalendářní heatmapa** ve stylu GitHubu: zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den.
 - **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění jen gramáž a stav, makra a kalorie se přepočítají z hodnot potraviny, aby čísla zůstala konzistentní.
 
@@ -360,6 +360,38 @@ Systém počítá energetickou bilanci a makroživiny dynamicky podle aktuální
    - Netréninkový den: ~2 150 kcal, Bílkoviny: ~175 g DIAAS (~2.11 g/kg), Tuky: ~65.0 g, Sacharidy: ~205 g
 
 Při zaznamenání nové tělesné hmotnosti se všechny cíle okamžitě a automaticky přepočítají.
+
+### Odkud se cíl bere
+
+Cíl není pevné číslo. Počítá se jako **aktuální váha krát poměr na kilogram**:
+
+```
+cíl_kcal = váha × kcal_na_kg
+```
+
+Poměry jsou kalibrované na 83 kg a liší se podle stavu a typu dne:
+
+| Stav | Typ dne | kcal/kg | Bílkoviny/kg | Sacharidy/kg | Tuky/kg |
+| :--- | :--- | ---: | ---: | ---: | ---: |
+| Lean Bulk | trénink | 37.95 | 1.87 | 5.18 | 0.99 |
+| Lean Bulk | odpočinek | 31.93 | 1.75 | 4.10 | 0.93 |
+| Maintenance | trénink | 33.13 | 1.81 | 3.86 | 0.99 |
+| Maintenance | odpočinek | 29.82 | 1.75 | 3.73 | 0.96 |
+| Cut | trénink | 26.51 | 2.11 | 2.59 | 0.82 |
+| Cut | odpočinek | 25.90 | 2.11 | 2.47 | 0.78 |
+
+Váha pro výpočet se bere z **posledního záznamu vážení**, nezávisle na zvoleném období. Když žádné vážení neexistuje, použije se hodnota z `user_settings`.
+
+Cíl se tedy sám mění, když:
+
+- zaznamenáš novou váhu (CLI, Discord `/vaha`, nebo zprávou),
+- přepneš stav přes `cil bulk|maintenance|cut`,
+- přepneš typ dne přes `den trenink|odpocinek`.
+
+Dvě věci stojí za pozornost:
+
+- **Cíl je vždy dnešní.** Dashboard porovnává i staré záznamy proti současnému cíli, protože historické cíle se neukládají. Při změně váhy se tedy zpětně změní i procenta plnění u minulých měsíců.
+- **`TARGET_CALORIES` a `TARGET_PROTEIN_G` v `.env` přebíjí výpočet.** Když je nastavíš, zůstanou pevné a nebudou se s váhou měnit.
 
 ---
 

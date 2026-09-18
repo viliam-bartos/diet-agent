@@ -146,6 +146,8 @@ def create_app() -> FastAPI:
             kpis["target_protein"] = (
                 settings.target_protein_g if settings.target_protein_g else targets.protein_usable
             )
+            kpis["target_carbs"] = targets.carbs
+            kpis["target_fats"] = targets.fats
             return kpis
         finally:
             conn.close()

@@ -812,18 +812,26 @@ def get_dashboard_kpis(
 
     daily_cals: dict[str, float] = defaultdict(float)
     daily_prots: dict[str, float] = defaultdict(float)
+    daily_carbs: dict[str, float] = defaultdict(float)
+    daily_fats: dict[str, float] = defaultdict(float)
 
     for f in food_logs:
         d = f.logged_at[:10]
         daily_cals[d] += f.calories
         daily_prots[d] += f.protein_usable
+        daily_carbs[d] += f.carbs
+        daily_fats[d] += f.fats
 
     days_logged = len(daily_cals)
     total_cals = sum(daily_cals.values())
     total_prots = sum(daily_prots.values())
+    total_carbs = sum(daily_carbs.values())
+    total_fats = sum(daily_fats.values())
 
     avg_cals = (total_cals / days_logged) if days_logged > 0 else 0.0
     avg_prots = (total_prots / days_logged) if days_logged > 0 else 0.0
+    avg_carbs = (total_carbs / days_logged) if days_logged > 0 else 0.0
+    avg_fats = (total_fats / days_logged) if days_logged > 0 else 0.0
 
     workout_days = {w.logged_at[:10] for w in workout_logs}
 
@@ -832,6 +840,8 @@ def get_dashboard_kpis(
         "weight_delta": weight_stats["delta_kg"],
         "avg_calories": round(avg_cals, 0),
         "avg_protein_diaas": round(avg_prots, 1),
+        "avg_carbs": round(avg_carbs, 1),
+        "avg_fats": round(avg_fats, 1),
         "total_workout_days": len(workout_days),
         "total_food_days": days_logged,
     }
