@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS food_logs (
     protein_usable REAL NOT NULL,
     carbs REAL NOT NULL,
     fats REAL NOT NULL,
-    nutrition_source TEXT NOT NULL DEFAULT 'curated'
+    nutrition_source TEXT NOT NULL DEFAULT 'curated',
+    conversion_estimated INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_food_logs_logged_at ON food_logs(logged_at);
@@ -65,6 +66,16 @@ CREATE TABLE IF NOT EXISTS foods (
 );
 
 CREATE INDEX IF NOT EXISTS idx_foods_source ON foods(source);
+
+CREATE TABLE IF NOT EXISTS unit_conversions (
+    food_key TEXT NOT NULL,
+    unit TEXT NOT NULL,
+    grams_per_unit REAL NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('user', 'ai')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (food_key, unit)
+);
 """
 
 # Kept separate so the migration can rebuild the table with the same definition.
@@ -88,6 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_foods_source ON foods(source);
 # Columns added after the first release, applied to databases created by older versions.
 COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("food_logs", "nutrition_source", "TEXT NOT NULL DEFAULT 'curated'"),
+    ("food_logs", "conversion_estimated", "INTEGER NOT NULL DEFAULT 0"),
 )
 
 

@@ -13,9 +13,16 @@ Tvým jediným úkolem je extrahovat entity a vrátit je ve formátu JSON podle 
 4. **Stav úpravy**: U hotových jídel z talíře automaticky nastavuj `state='cooked'`. U masa specifikuj hmotnost pouze pro jedlou část bez kostí.
 5. **Příznak odhadu (`is_estimated`)**: Vždy nastav `is_estimated=True`, pokud gramáž nebyla v textu explicitně uvedena číslem. Pokud uživatel zadal přesné číslo (např. *"150g rýže"*, *"200g masa"*), nastav `is_estimated=False`.
 6. **Normalizace**: Názvy potravin normalizuj do základního tvaru v češtině v jednotném čísle (např. *"pečených brambor"* -> *"brambory"*).
-7. **Tělesná hmotnost**: Pokud uživatel hlásí tělesnou váhu, nastav `log_type` na `"WEIGHT"` a vyplň `weight_kg`.
-8. **Neplatné vstupy (Fail Fast)**: Pokud je vstup nesrozumitelný, neobsahuje údaje o jídle ani váze, nebo chybí množství u vážené suroviny, nastav `log_type` na `"INVALID"` a do `error_reason` uveď důvod.
-9. **Formát výstupu**: Zákaz jakéhokoliv doplňkového textu mimo validní JSON odpovídající schématu.
+7. **Jednotky**: Zachovej míru, kterou uživatel skutečně použil. Neměň ji na `"ks"` ani na gramy a nedopočítávej hmotnost.
+   - `"g"` / `"ml"` pro vážené a tekuté suroviny (*"150g rýže"*, *"200ml mléka"*).
+   - `"odměrka"` pro odměrky (*"2 odměrky proteinu"* -> `amount: 2, unit: "odměrka"`).
+   - `"lžíce"`, `"lžička"` pro lžíce (*"lžíce olivového oleje"* -> `amount: 1, unit: "lžíce"`).
+   - `"hrnek"`, `"plátek"` (*"2 plátky šunky"*), `"krajíc"` (*"krajíc chleba"*).
+   - `"ks"` pro počitatelné kusy (*"2 vejce"*, *"1 banán"*).
+   - `"porce"` pro hotová jídla na talíři (*"svíčková"* -> `amount: 1, unit: "porce"`).
+8. **Tělesná hmotnost**: Pokud uživatel hlásí tělesnou váhu, nastav `log_type` na `"WEIGHT"` a vyplň `weight_kg`.
+9. **Neplatné vstupy (Fail Fast)**: Pokud je vstup nesrozumitelný, neobsahuje údaje o jídle ani váze, nebo chybí množství u vážené suroviny, nastav `log_type` na `"INVALID"` a do `error_reason` uveď důvod.
+10. **Formát výstupu**: Zákaz jakéhokoliv doplňkového textu mimo validní JSON odpovídající schématu.
 
 ---
 
@@ -31,9 +38,23 @@ class ExtractedFoodItem(BaseModel):
         description="Standardizovaný název potraviny v češtině, např. 'kuřecí prsa', 'rýže'"
     )
     amount: float = Field(description="Numerické množství suroviny v gramech, ml nebo kusech")
-    unit: Literal["g", "ml", "ks", "porce"] = Field(
+    unit: Literal[
+        "g",
+        "ml",
+        "ks",
+        "porce",
+        "odměrka",
+        "lžíce",
+        "lžička",
+        "hrnek",
+        "plátek",
+        "krajíc",
+    ] = Field(
         default="g",
-        description="Jednotka množství; pokud chybí, použij 'g'",
+        description=(
+            "Jednotka množství. Zachovej míru, kterou uživatel použil; "
+            "nepřeváděj na gramy ani na 'ks'. Převod na gramy řeší lokální kód."
+        ),
     )
     state: Literal["raw", "cooked"] = Field(
         default="raw",

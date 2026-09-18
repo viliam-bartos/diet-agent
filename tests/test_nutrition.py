@@ -91,14 +91,40 @@ def test_calculate_food_log_cooked_state_adjustment():
 
     # 150g raw rice: multiplier = 1.5 -> 355 * 1.5 = 532.5 kcal
     raw_item = ExtractedFoodItem(name="rýže", amount=150.0, unit="g", state="raw")
-    raw_log = calculate_food_log(raw_item, rice_def, "150g suché rýže")
+    raw_log = calculate_food_log(raw_item, rice_def, "150g suché rýže", amount_g=150.0)
     assert raw_log.calories == 532.5
     assert raw_log.protein_raw == 10.5
 
     # 150g cooked rice: 150 * 0.40 = 60g raw equivalent -> 355 * 0.6 = 213.0 kcal
     cooked_item = ExtractedFoodItem(name="rýže", amount=150.0, unit="g", state="cooked")
-    cooked_log = calculate_food_log(cooked_item, rice_def, "150g vařené rýže")
+    cooked_log = calculate_food_log(cooked_item, rice_def, "150g vařené rýže", amount_g=150.0)
     assert cooked_log.calories == 213.0
     assert cooked_log.protein_raw == 4.2
     assert cooked_log.state == "cooked"
     assert cooked_log.amount_g == 150.0
+    assert cooked_log.conversion_estimated is False
+
+
+def test_calculate_food_log_marks_estimated_conversion():
+    """The conversion flag survives into the calculated log."""
+    from nutrition_agent.models import ExtractedFoodItem, FoodDefinition
+    from nutrition_agent.nutrition import calculate_food_log
+
+    food = FoodDefinition(name="Test", calories=100.0, protein=1.0, carbs=1.0, fats=1.0)
+    item = ExtractedFoodItem(name="test", amount=2.0, unit="porce", state="cooked")
+
+    log = calculate_food_log(item, food, "2 porce", amount_g=600.0, conversion_estimated=True)
+    assert log.conversion_estimated is True
+    assert log.amount_g == 600.0
+
+
+def test_calculate_food_log_rejects_non_positive_grams():
+    """Zero grams would silently produce an empty log, so it fails fast."""
+    from nutrition_agent.models import ExtractedFoodItem, FoodDefinition
+    from nutrition_agent.nutrition import calculate_food_log
+
+    food = FoodDefinition(name="Test", calories=100.0, protein=1.0, carbs=1.0, fats=1.0)
+    item = ExtractedFoodItem(name="test", amount=1.0, unit="ks", state="raw")
+
+    with pytest.raises(ValueError, match="musí být kladné číslo"):
+        calculate_food_log(item, food, "1 ks", amount_g=0.0)

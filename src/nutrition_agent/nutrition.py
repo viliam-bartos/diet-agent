@@ -4,7 +4,6 @@ import logging
 import re
 import unicodedata
 from enum import StrEnum
-from typing import Literal
 
 from rapidfuzz import fuzz
 
@@ -72,16 +71,33 @@ FOLDED_SYNONYMS: dict[str, str] = {
     strip_diacritics(key): value for key, value in FOOD_SYNONYMS.items()
 }
 
-# Standard piece and measure weights in grams (vault.md section 2)
-STANDARD_UNIT_WEIGHTS_GRAMS: dict[str, float] = {
+# Weights that depend on the specific food, per countable piece.
+PIECE_WEIGHTS_GRAMS: dict[str, float] = {
     "vejce": 55.0,
     "vejce (celé)": 55.0,
     "banán": 120.0,
     "jablko": 150.0,
-    "lžíce oleje": 13.0,
-    "lžička oleje": 5.0,
-    "odměrka proteinu": 30.0,
 }
+
+# Household measures with a weight that does not depend on the food.
+# Anything missing here has to be estimated or filled in by the user, never guessed.
+GENERIC_MEASURE_WEIGHTS_GRAMS: dict[str, float] = {
+    "lžíce": 13.0,
+    "lžíce oleje": 13.0,
+    "lžička": 5.0,
+    "lžička oleje": 5.0,
+    "hrnek": 240.0,
+    "odměrka": 30.0,
+    "odměrka proteinu": 30.0,
+    "plátek": 20.0,
+    "krajíc": 40.0,
+}
+
+# Units that describe an absolute amount and need no conversion table.
+ABSOLUTE_UNITS: frozenset[str] = frozenset({"g", "ml"})
+
+# Units whose grams depend on the food, not on a fixed household measure.
+FOOD_DEPENDENT_UNITS: frozenset[str] = frozenset({"ks", "porce"})
 
 # Cooking conversion ratios: multiplier from cooked weight to raw equivalent weight.
 # Meat/fish lose ~20-25% water (yield ~0.75-0.80), so 100g cooked = ~1.25g raw.
@@ -255,53 +271,64 @@ def find_matching_food(
     return chosen_food, chosen_score
 
 
+def lookup_unit_weight(food_name: str, unit: str) -> float | None:
+    """Return grams for one unit of a food, or None when nothing is known.
+
+    Piece weights tied to a specific food win over the generic measure table, so
+    '1 ks vejce' uses 55 g while '1 plátek šunky' uses the generic measure.
+    """
+    food_norm = food_name.strip().lower()
+    unit_norm = unit.strip().lower()
+
+    if unit_norm == "ks":
+        for key, weight in PIECE_WEIGHTS_GRAMS.items():
+            if key in food_norm or food_norm in key:
+                return weight
+
+    return GENERIC_MEASURE_WEIGHTS_GRAMS.get(unit_norm)
+
+
 def convert_to_grams(
     food_name: str,
     amount: float,
-    unit: Literal["g", "ml", "ks", "porce"] | str,
-) -> float:
-    """Convert given unit and amount to weight in grams.
+    unit: str,
+) -> float | None:
+    """Convert an amount and unit into grams, or None when the conversion is unknown.
 
-    Uses standard piece/measure conversions from vault.md.
+    Returning None instead of a made-up default keeps invented weights out of the
+    database; the caller decides whether to estimate or ask the user.
     """
     if amount <= 0:
         raise ValueError("Množství musí být kladné číslo.")
 
     unit_norm = unit.strip().lower()
-    food_norm = food_name.strip().lower()
 
-    if unit_norm == "g":
-        return amount
-    if unit_norm == "ml":
-        # Liquids: default to 1 ml ~= 1 g unless specific density needed
+    # 1 ml of a water-based liquid is treated as 1 g.
+    if unit_norm in ABSOLUTE_UNITS:
         return amount
 
-    if unit_norm == "ks":
-        # Check piece table for matching item
-        for key, weight in STANDARD_UNIT_WEIGHTS_GRAMS.items():
-            if key in food_norm or food_norm in key:
-                return amount * weight
-        # Default fallback for unlisted 1 piece is 100g
-        return amount * 100.0
+    unit_weight = lookup_unit_weight(food_name, unit_norm)
+    if unit_weight is None:
+        return None
 
-    if unit_norm == "porce":
-        # Default single portion estimation
-        return amount * 150.0
-
-    return amount
+    return amount * unit_weight
 
 
 def calculate_food_log(
     item: ExtractedFoodItem,
     food_def: FoodDefinition,
     raw_input: str,
+    amount_g: float,
+    conversion_estimated: bool = False,
 ) -> CalculatedFoodLog:
     """Calculate scaled macronutrients, calories, and DIAAS protein for an item.
 
     Converts cooked foods to their raw-equivalent weight when computing nutrition
-    against the raw food database.
+    against the raw food database. Grams must already be resolved by the caller,
+    which keeps unit conversion and estimation out of the arithmetic.
     """
-    amount_g = convert_to_grams(food_def.name, item.amount, item.unit)
+    if amount_g <= 0:
+        raise ValueError("Hmotnost potraviny musí být kladné číslo.")
 
     if item.state == "cooked":
         ratio = get_cooked_to_raw_ratio(food_def.name)
@@ -329,6 +356,7 @@ def calculate_food_log(
         carbs=carbs,
         fats=fats,
         nutrition_source=food_def.source,
+        conversion_estimated=conversion_estimated,
     )
 
 

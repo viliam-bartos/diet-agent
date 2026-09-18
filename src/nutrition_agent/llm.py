@@ -6,7 +6,11 @@ from google import genai
 from google.genai import types
 
 from nutrition_agent.config import settings
-from nutrition_agent.models import EstimatedFoodNutrition, UserLog
+from nutrition_agent.models import (
+    EstimatedFoodNutrition,
+    EstimatedUnitConversion,
+    UserLog,
+)
 
 SYSTEM_INSTRUCTION = """Jsi striktní parser uživatelských zpráv o stravě a tělesné hmotnosti.
 Tvým jediným úkolem je extrahovat entity a vrátit je v JSON podle schématu UserLog.
@@ -26,13 +30,21 @@ Pravidla chování:
 5. Příznak odhadu (is_estimated): Nastav is_estimated=True, pokud gramáž nebyla v textu
    uvedena číslem. Pokud uživatel zadal přesné číslo (např. '150g rýže'), nastav is_estimated=False.
 6. Normalizace: Názvy potravin normalizuj do základního tvaru v češtině v jednotném čísle.
-7. Tělesná hmotnost:
+7. Jednotky: Zachovej míru, kterou uživatel skutečně použil. Neměň ji na 'ks' ani na gramy.
+   - 'g' nebo 'ml' pro vážené a tekuté suroviny ('150g rýže', '200ml mléka').
+   - 'odměrka' pro odměrky ('2 odměrky proteinu' -> amount: 2, unit: 'odměrka').
+   - 'lžíce', 'lžička' pro lžíce ('lžíce olivového oleje' -> amount: 1, unit: 'lžíce').
+   - 'hrnek' pro hrnky, 'plátek' pro plátky ('2 plátky šunky'), 'krajíc' pro krajíce chleba.
+   - 'ks' pro počitatelné kusy ('2 vejce', '1 banán').
+   - 'porce' pro hotová jídla na talíři ('svíčková' -> amount: 1, unit: 'porce').
+   Nikdy neuváděj gramy, pokud je uživatel neuvedl. Převod na gramy řeší lokální kód.
+8. Tělesná hmotnost:
    - Pokud uživatel hlásí tělesnou váhu (např. 'Váha 83 kg', 'Vážím 82.5', 'Dnes 84.1kg'):
      nastav log_type: 'WEIGHT' a do pole weight_kg vlož numerickou hodnotu váhy v kg jako float.
      Pole items MUSÍ být prázdný seznam [].
-8. Neplatné vstupy: Pokud je vstup nesrozumitelný nebo chybí množství u vážené suroviny,
+9. Neplatné vstupy: Pokud je vstup nesrozumitelný nebo chybí množství u vážené suroviny,
    nastav log_type: 'INVALID' a do error_reason uveď důvod.
-9. Formát výstupu: Zákaz jakéhokoliv doplňkového textu mimo validní JSON schématu.
+10. Formát výstupu: Zákaz jakéhokoliv doplňkového textu mimo validní JSON schématu.
 
 Příklady očekávaných JSON výstupů:
 Vstup: "Váha 83 kg"
@@ -43,6 +55,15 @@ Výstup: {"log_type": "FOOD", "items": [{"name": "kuřecí prsa", "amount": 200.
 
 Vstup: "Měl jsem jablko"
 Výstup: {"log_type": "FOOD", "items": [{"name": "jablko", "amount": 1.0, "unit": "ks"}]}
+
+Vstup: "Dal jsem si 2 odměrky proteinu"
+Výstup: {"log_type": "FOOD", "items": [{"name": "syrovátkový protein",
+  "amount": 2.0, "unit": "odměrka"}]}
+
+Vstup: "Lžíce olivového oleje a 2 plátky šunky"
+Výstup: {"log_type": "FOOD", "items": [
+  {"name": "olivový olej", "amount": 1.0, "unit": "lžíce"},
+  {"name": "šunka", "amount": 2.0, "unit": "plátek"}]}
 
 Vstup: "Měl jsem rýži"
 Výstup: {"log_type": "INVALID", "error_reason": "Nespecifikované množství suroviny"}
@@ -200,3 +221,75 @@ def estimate_food_nutrition(
         return EstimatedFoodNutrition.model_validate_json(response.text)
 
     raise ValueError(f"Model nevrátil odhad pro potravinu '{food_name}'.")
+
+
+UNIT_CONVERSION_INSTRUCTION = """Jsi převodník kuchyňských měr na gramy.
+Dostaneš potravinu a jednotku, kterou uživatel použil. Odpověz, kolik gramů odpovídá
+jedné takové jednotce u této konkrétní potraviny.
+
+Pravidla:
+1. Vrátíš pouze JSON podle schématu EstimatedUnitConversion.
+2. Počítej jednu jednotku, ne množství, které uživatel zadal.
+3. Vycházej z reálné hmotnosti dané potraviny:
+   - 'odměrka' proteinu je obvykle 30 g, ale u konkrétního produktu se může lišit.
+   - 'porce' hotového jídla je obvykle 250-400 g podle druhu jídla.
+   - 'plátek' šunky je obvykle 15-25 g, 'krajíc' chleba 35-50 g.
+   - 'hrnek' je obvykle 200-250 g podle potraviny.
+   - 'ks' je hmotnost jednoho kusu dané potraviny (např. 1 banán 120 g).
+4. Uveď hodnotu v gramech jako číslo. Nepoužívej rozsahy ani text.
+5. Pokud jednotku u dané potraviny neznáš, vrať 0.
+
+Příklady:
+Vstup: "syrovátkový protein", "odměrka"
+Výstup: {"name": "syrovátkový protein", "unit": "odměrka", "grams_per_unit": 30}
+
+Vstup: "svíčková na smetaně", "porce"
+Výstup: {"name": "svíčková na smetaně", "unit": "porce", "grams_per_unit": 350}
+
+Vstup: "šunka vepřová výběrová", "plátek"
+Výstup: {"name": "šunka vepřová výběrová", "unit": "plátek", "grams_per_unit": 20}
+"""
+
+
+def estimate_unit_conversion(
+    food_name: str,
+    unit: str,
+    client: genai.Client | None = None,
+    model: str = "gemini-3.6-flash",
+) -> EstimatedUnitConversion:
+    """Ask the model how many grams one unit of a food weighs.
+
+    The result is an estimate and a suggestion only; callers must store it with an
+    'ai' source and keep it visible and correctable. An unknown unit must come back
+    as zero so the caller can refuse instead of inventing a weight.
+    """
+    clean_name = food_name.strip()
+    clean_unit = unit.strip().lower()
+    if not clean_name:
+        raise ValueError("Nelze odhadnout převod pro prázdný název potraviny.")
+    if not clean_unit:
+        raise ValueError("Nelze odhadnout převod pro prázdnou jednotku.")
+
+    active_client = client or create_gemini_client()
+
+    config = types.GenerateContentConfig(
+        system_instruction=UNIT_CONVERSION_INSTRUCTION,
+        response_mime_type="application/json",
+        response_schema=EstimatedUnitConversion,
+        temperature=0.0,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
+
+    response = active_client.models.generate_content(
+        model=model,
+        contents=f"{clean_name} | {clean_unit}",
+        config=config,
+    )
+
+    if isinstance(response.parsed, EstimatedUnitConversion):
+        return response.parsed
+
+    if response.text:
+        return EstimatedUnitConversion.model_validate_json(response.text)
+
+    raise ValueError(f"Model nevrátil převod pro '{clean_unit}' u '{food_name}'.")

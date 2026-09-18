@@ -8,7 +8,11 @@ from datetime import datetime
 
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
-from nutrition_agent.llm import estimate_food_nutrition, parse_user_message
+from nutrition_agent.llm import (
+    estimate_food_nutrition,
+    estimate_unit_conversion,
+    parse_user_message,
+)
 from nutrition_agent.models import (
     CalculatedWeightLog,
     CalculatedWorkoutLog,
@@ -20,6 +24,7 @@ from nutrition_agent.models import (
 from nutrition_agent.nutrition import (
     build_food_from_estimate,
     calculate_food_log,
+    convert_to_grams,
     find_matching_food,
     validate_body_weight,
 )
@@ -27,15 +32,20 @@ from nutrition_agent.reporting import format_daily_target_breakdown, generate_pe
 from nutrition_agent.repository import (
     DAY_LOG_LABELS,
     delete_day_logs,
+    delete_food,
     ensure_food_catalog,
     get_daily_food_logs,
     get_food,
     get_recent_food_logs,
     get_recent_weight_logs,
+    get_unit_conversion,
     get_user_profile,
+    list_foods_by_source,
+    list_unit_conversions,
     load_foods,
     save_food_logs,
     save_learned_food,
+    save_unit_conversion,
     save_weight_log,
     save_workout_log,
     set_user_setting,
@@ -89,6 +99,46 @@ def resolve_food(
     learned = build_food_from_estimate(estimate)
     save_learned_food(conn, learned)
     return learned, True
+
+
+def resolve_grams(
+    conn: sqlite3.Connection,
+    food_def: FoodDefinition,
+    amount: float,
+    unit: str,
+) -> tuple[float, bool]:
+    """Resolve an amount and unit into grams, asking the model as a last resort.
+
+    Order: absolute units, the curated tables, conversions the user or the model
+    already stored, and only then a fresh estimate. Returns the grams and whether
+    the conversion had to be estimated.
+    """
+    known = convert_to_grams(food_def.name, amount, unit)
+    if known is not None:
+        return known, False
+
+    learned = get_unit_conversion(conn, food_def.name, unit)
+    if learned is not None:
+        grams_per_unit, source = learned
+        return amount * grams_per_unit, source == "ai"
+
+    logger.info("Neznámý převod '%s' u '%s', žádám model.", unit, food_def.name)
+    try:
+        estimate = estimate_unit_conversion(food_def.name, unit)
+    except (ValueError, RuntimeError) as exc:
+        raise ValueError(
+            f"Nevím, kolik gramů je 1 {unit} u potraviny '{food_def.name}' ({exc}). "
+            f"Zadej prosím množství v gramech."
+        ) from exc
+
+    if estimate.grams_per_unit <= 0:
+        raise ValueError(
+            f"Nevím, kolik gramů je 1 {unit} u potraviny '{food_def.name}'. "
+            f"Zadej prosím množství v gramech."
+        )
+
+    save_unit_conversion(conn, food_def.name, unit, estimate.grams_per_unit, source="ai")
+    return amount * estimate.grams_per_unit, True
 
 
 def correct_food_nutrition(conn: sqlite3.Connection, argument: str) -> str:
@@ -152,6 +202,96 @@ def correct_food_nutrition(conn: sqlite3.Connection, argument: str) -> str:
     )
 
 
+def list_catalog_entries(conn: sqlite3.Connection, argument: str) -> str:
+    """List catalog foods, either all of them or only the AI-estimated ones."""
+    selector = argument.strip().lower()
+    if selector in ("", "vse", "vše", "all"):
+        foods = load_foods(conn)
+        title = "Katalog potravin"
+    elif selector in ("ai", "odhad", "odhady"):
+        foods = list_foods_by_source(conn, "ai")
+        title = "Potraviny naučené odhadem AI"
+    elif selector in ("curated", "katalog", "rucni", "ruční"):
+        foods = list_foods_by_source(conn, "curated")
+        title = "Kurátorované potraviny"
+    else:
+        return "Použití: jidla [ai | curated | vse]"
+
+    if not foods:
+        return f"{title}: žádné záznamy."
+
+    lines = [f"{title} ({len(foods)}):"]
+    for food in foods:
+        lines.append(
+            f"- {food.name}: {food.calories:.0f} kcal, {food.protein:.1f} g bílkovin, "
+            f"{food.carbs:.1f} g sacharidů, {food.fats:.1f} g tuků na 100 g"
+        )
+    if selector in ("ai", "odhad", "odhady"):
+        lines.append("Smazání: jidla smaz <nazev>")
+        lines.append("Oprava hodnot: jidlo <nazev> <kcal> <bilkoviny> <sacharidy> <tuky>")
+    return "\n".join(lines)
+
+
+def delete_catalog_food(conn: sqlite3.Connection, argument: str) -> str:
+    """Delete a food from the catalog by name."""
+    name = argument.strip()
+    if not name:
+        return "Použití: jidla smaz <nazev>"
+
+    try:
+        removed = delete_food(conn, name)
+    except LookupError:
+        return f"Potravina '{name}' není v katalogu."
+
+    note = (
+        " Už zaznamenané dny zůstávají beze změny."
+        if removed.source == "ai"
+        else " Pozor: šlo o kurátorovanou potravinu z katalogu."
+    )
+    return f"Smazáno z katalogu: {removed.name}.{note}"
+
+
+def show_unit_conversions(conn: sqlite3.Connection, argument: str) -> str:
+    """Show or correct learned grams-per-unit conversions.
+
+    Usage: 'prevod' to list, 'prevod <nazev> <jednotka> <gramy>' to overwrite.
+    """
+    tokens = argument.split()
+    if not tokens:
+        conversions = list_unit_conversions(conn)
+        if not conversions:
+            return "Žádné naučené převody jednotek."
+        lines = [f"Naučené převody jednotek ({len(conversions)}):"]
+        for item in conversions:
+            source = "uživatel" if item["source"] == "user" else "AI odhad"
+            lines.append(
+                f"- {item['food_key']} | 1 {item['unit']} = "
+                f"{item['grams_per_unit']:.1f} g ({source})"
+            )
+        lines.append("Oprava: prevod <nazev> <jednotka> <gramy>")
+        return "\n".join(lines)
+
+    if len(tokens) < 3:
+        return "Použití: prevod [<nazev> <jednotka> <gramy>]"
+
+    try:
+        grams = float(tokens[-1].replace(",", "."))
+    except ValueError:
+        return f"Hodnota '{tokens[-1]}' není číslo."
+
+    unit = tokens[-2].lower()
+    name = " ".join(tokens[:-2]).strip()
+    if not name:
+        return "Chybí název potraviny. Použití: prevod <nazev> <jednotka> <gramy>"
+
+    try:
+        save_unit_conversion(conn, name, unit, grams, source="user")
+    except ValueError as exc:
+        return f"Chyba: {exc}"
+
+    return f"Převod uložen: {name} | 1 {unit} = {grams:.1f} g (uživatel)."
+
+
 def format_history(conn: sqlite3.Connection, limit: int = 10) -> str:
     """Format recent food and weight logs."""
     food_logs = get_recent_food_logs(conn, limit=limit)
@@ -167,9 +307,11 @@ def format_history(conn: sqlite3.Connection, limit: int = 10) -> str:
         for item in food_logs:
             time_part = item.logged_at[:16].replace("T", " ")
             ai_flag = " [AI odhad]" if item.nutrition_source == "ai" else ""
+            conv_flag = " [odhad převodu]" if item.conversion_estimated else ""
             lines.append(
                 f"- {time_part} | {item.food_name_matched} ({item.amount_g:.0f} g, {item.state}) | "
-                f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS{ai_flag}"
+                f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS"
+                f"{ai_flag}{conv_flag}"
             )
 
     if weight_logs:
@@ -263,6 +405,15 @@ def handle_user_message(
             return "Použití: jidlo <nazev> [<kcal> <bilkoviny> <sacharidy> <tuky>]"
         return correct_food_nutrition(conn, parts[1])
 
+    if first_token in ("jidla", "jídla", "potraviny", "foods"):
+        if len(parts) > 1 and parts[1].lower().startswith(("smaz", "smaž", "vymaz", "vymaž")):
+            inner = parts[1].split(maxsplit=1)
+            return delete_catalog_food(conn, inner[1] if len(inner) > 1 else "")
+        return list_catalog_entries(conn, parts[1] if len(parts) > 1 else "")
+
+    if first_token in ("prevod", "převod", "jednotka", "jednotky"):
+        return show_unit_conversions(conn, parts[1] if len(parts) > 1 else "")
+
     # 2. Timeframe reporting commands
     if command_lower in ("dnes", "prehled", "přehled", "dnesek", "summary", "today"):
         return generate_period_report(conn, "denni")
@@ -319,9 +470,13 @@ def handle_user_message(
 
         calculated_items = []
         learned_names: list[str] = []
+        estimated_conversions: list[tuple[str, str]] = []
         for item in user_log.items:
             try:
                 food_def, was_learned = resolve_food(conn, item.name, foods)
+                amount_g, conversion_estimated = resolve_grams(
+                    conn, food_def, item.amount, item.unit
+                )
             except FoodNotFoundError as exc:
                 return f"Chyba: {exc}"
             except (ValueError, RuntimeError) as exc:
@@ -332,7 +487,16 @@ def handle_user_message(
                 foods.append(food_def)
                 learned_names.append(food_def.name)
 
-            calculated = calculate_food_log(item, food_def, clean_input)
+            if conversion_estimated:
+                estimated_conversions.append((food_def.name, item.unit))
+
+            calculated = calculate_food_log(
+                item,
+                food_def,
+                clean_input,
+                amount_g,
+                conversion_estimated=conversion_estimated,
+            )
             calculated_items.append(calculated)
 
         save_food_logs(conn, calculated_items)
@@ -341,12 +505,13 @@ def handle_user_message(
         for item in calculated_items:
             est_flag = " (odhad množství)" if item.is_estimated else ""
             ai_flag = " [AI odhad maker]" if item.nutrition_source == "ai" else ""
+            conv_flag = " [odhad převodu]" if item.conversion_estimated else ""
             state_flag = f" ({item.state})" if item.state == "cooked" else ""
             lines.append(
                 f"- {item.food_name_matched} ({item.amount_g:.0f} g{state_flag}{est_flag}): "
                 f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS "
                 f"(celkem {item.protein_raw:.1f} g) | Sacharidy: {item.carbs:.1f} g | "
-                f"Tuky: {item.fats:.1f} g{ai_flag}"
+                f"Tuky: {item.fats:.1f} g{ai_flag}{conv_flag}"
             )
 
         if learned_names:
@@ -365,8 +530,21 @@ def handle_user_message(
                     )
             lines.append(
                 "Hodnoty jde opravit příkazem: "
-                f"jidlo {' | '.join(learned_names[:1])} <kcal> <bilkoviny> <sacharidy> <tuky>"
+                f"jidlo {learned_names[0]} <kcal> <bilkoviny> <sacharidy> <tuky>"
             )
+
+        if estimated_conversions:
+            lines.append("---")
+            lines.append(
+                "U těchto položek jsem neznal hmotnost jednotky, takže ji model odhadl "
+                "a uložil (příště se použije stejná):"
+            )
+            for name, unit in estimated_conversions:
+                learned = get_unit_conversion(conn, name, unit)
+                grams = f"{learned[0]:.0f} g" if learned else "?"
+                lines.append(f"- {name}: 1 {unit} = {grams}")
+            first_name, first_unit = estimated_conversions[0]
+            lines.append(f"Oprava: prevod {first_name} {first_unit} <gramy>")
 
         today_prefix = datetime.now().strftime("%Y-%m-%d")
         daily_foods = get_daily_food_logs(conn, today_prefix)

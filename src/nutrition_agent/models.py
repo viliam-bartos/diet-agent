@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 MIN_WEIGHT_KG: float = 30.0
 MAX_WEIGHT_KG: float = 300.0
 MIN_FOOD_MATCH_SCORE: float = 75.0
+MAX_UNIT_GRAMS: float = 5000.0
 
 
 def utc_now_iso() -> str:
@@ -92,6 +93,22 @@ class FoodState(StrEnum):
     COOKED = "cooked"
 
 
+# Units the parser may return. Absolute units carry their own amount, the rest are
+# converted to grams by the local code (curated table, learned table, or an estimate).
+LOG_UNITS: tuple[str, ...] = (
+    "g",
+    "ml",
+    "ks",
+    "porce",
+    "odměrka",
+    "lžíce",
+    "lžička",
+    "hrnek",
+    "plátek",
+    "krajíc",
+)
+
+
 class ExtractedFoodItem(BaseModel):
     """Food item extracted by LLM parser."""
 
@@ -105,9 +122,24 @@ class ExtractedFoodItem(BaseModel):
         ...,
         description="Numerické množství suroviny v gramech, ml nebo kusech",
     )
-    unit: Literal["g", "ml", "ks", "porce"] = Field(
+    unit: Literal[
+        "g",
+        "ml",
+        "ks",
+        "porce",
+        "odměrka",
+        "lžíce",
+        "lžička",
+        "hrnek",
+        "plátek",
+        "krajíc",
+    ] = Field(
         default="g",
-        description="Jednotka množství; pokud chybí, použij 'g'",
+        description=(
+            "Jednotka množství. Použij 'g' nebo 'ml' pro vážené suroviny a konkrétní "
+            "míru ('odměrka', 'lžíce', 'lžička', 'hrnek', 'plátek', 'krajíc', 'ks', "
+            "'porce'), pokud ji uživatel uvedl."
+        ),
     )
     state: Literal["raw", "cooked"] = Field(
         default="raw",
@@ -270,6 +302,36 @@ class EstimatedFoodNutrition(BaseModel):
         return self
 
 
+class EstimatedUnitConversion(BaseModel):
+    """Grams per one unit of a food, as estimated by the LLM.
+
+    Zero is a valid answer meaning 'this unit is unknown for this food'. The caller
+    decides whether to refuse the log; the schema only rejects nonsense.
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    name: str = Field(description="Název potraviny, ke které se převod vztahuje")
+    unit: str = Field(description="Jednotka, např. 'odměrka', 'lžíce', 'porce', 'ks'")
+    grams_per_unit: float = Field(
+        default=0.0,
+        description="Kolik gramů odpovídá jedné jednotce; 0 znamená, že jednotku neznáš",
+    )
+
+    @field_validator("grams_per_unit")
+    @classmethod
+    def validate_grams(cls, value: float) -> float:
+        """Grams per unit must not be negative and must stay plausible (Fail Fast)."""
+        if value < 0:
+            raise ValueError("Hmotnost jedné jednotky nesmí být záporná.")
+        if value > MAX_UNIT_GRAMS:
+            raise ValueError(
+                f"Hmotnost jedné jednotky {value} g je mimo rozumný rozsah "
+                f"(maximum {MAX_UNIT_GRAMS:.0f} g)."
+            )
+        return value
+
+
 class CalculatedFoodLog(BaseModel):
     """Processed food log ready for SQLite persistence."""
 
@@ -288,6 +350,7 @@ class CalculatedFoodLog(BaseModel):
     carbs: float
     fats: float
     nutrition_source: Literal["curated", "ai"] = "curated"
+    conversion_estimated: bool = False
 
 
 class CalculatedWeightLog(BaseModel):

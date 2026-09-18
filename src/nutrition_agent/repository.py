@@ -167,6 +167,111 @@ def update_food_nutrition(
     return updated
 
 
+def list_foods_by_source(conn: sqlite3.Connection, source: str) -> list[FoodDefinition]:
+    """List foods for one source layer ('curated' or 'ai')."""
+    return load_foods(conn, source=source)
+
+
+def delete_food(conn: sqlite3.Connection, name: str) -> FoodDefinition:
+    """Remove a food from the catalog. Raises LookupError when it does not exist."""
+    existing = get_food(conn, name)
+    if existing is None:
+        raise LookupError(f"Potravina '{name}' není v katalogu.")
+
+    conn.execute("DELETE FROM foods WHERE name_key = ?", (food_name_key(existing.name),))
+    conn.execute("DELETE FROM unit_conversions WHERE food_key = ?", (food_name_key(existing.name),))
+    conn.commit()
+    return existing
+
+
+def get_unit_conversion(
+    conn: sqlite3.Connection,
+    food_name: str,
+    unit: str,
+) -> tuple[float, str] | None:
+    """Return (grams_per_unit, source) for a learned conversion, or None."""
+    row = conn.execute(
+        """
+        SELECT grams_per_unit, source
+        FROM unit_conversions
+        WHERE food_key = ? AND unit = ?
+        """,
+        (food_name_key(food_name), unit.strip().lower()),
+    ).fetchone()
+    if row is None:
+        return None
+    return float(row["grams_per_unit"]), str(row["source"])
+
+
+def save_unit_conversion(
+    conn: sqlite3.Connection,
+    food_name: str,
+    unit: str,
+    grams_per_unit: float,
+    source: str = "ai",
+) -> None:
+    """Store or overwrite the grams-per-unit conversion for a food."""
+    if source not in ("user", "ai"):
+        raise ValueError("Zdroj převodu musí být 'user' nebo 'ai'.")
+
+    now = utc_now_iso()
+    conn.execute(
+        """
+        INSERT INTO unit_conversions
+            (food_key, unit, grams_per_unit, source, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(food_key, unit) DO UPDATE SET
+            grams_per_unit = excluded.grams_per_unit,
+            source = excluded.source,
+            updated_at = excluded.updated_at
+        """,
+        (
+            food_name_key(food_name),
+            unit.strip().lower(),
+            grams_per_unit,
+            source,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def delete_unit_conversion(
+    conn: sqlite3.Connection,
+    food_name: str,
+    unit: str,
+) -> bool:
+    """Remove a learned conversion. Returns True when a row was deleted."""
+    cursor = conn.execute(
+        "DELETE FROM unit_conversions WHERE food_key = ? AND unit = ?",
+        (food_name_key(food_name), unit.strip().lower()),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def list_unit_conversions(conn: sqlite3.Connection) -> list[dict[str, object]]:
+    """List every learned conversion, newest first."""
+    rows = conn.execute(
+        """
+        SELECT food_key, unit, grams_per_unit, source, updated_at
+        FROM unit_conversions
+        ORDER BY updated_at DESC, food_key ASC
+        """
+    ).fetchall()
+    return [
+        {
+            "food_key": row["food_key"],
+            "unit": row["unit"],
+            "grams_per_unit": float(row["grams_per_unit"]),
+            "source": row["source"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
 def save_food_logs(
     conn: sqlite3.Connection,
     logs: list[CalculatedFoodLog],
@@ -179,8 +284,8 @@ def save_food_logs(
     INSERT INTO food_logs (
         logged_at, raw_input, food_name_matched, amount_g,
         state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
-        nutrition_source
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        nutrition_source, conversion_estimated
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     saved_logs: list[CalculatedFoodLog] = []
     cursor = conn.cursor()
@@ -200,6 +305,7 @@ def save_food_logs(
                 log.carbs,
                 log.fats,
                 log.nutrition_source,
+                1 if log.conversion_estimated else 0,
             ),
         )
         saved_logs.append(log.model_copy(update={"id": cursor.lastrowid}))
@@ -238,6 +344,7 @@ def _row_to_food_log(row: sqlite3.Row) -> CalculatedFoodLog:
         carbs=row["carbs"],
         fats=row["fats"],
         nutrition_source=row["nutrition_source"],
+        conversion_estimated=bool(row["conversion_estimated"]),
     )
 
 
@@ -249,7 +356,7 @@ def get_recent_food_logs(
     sql = """
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
            state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
-           nutrition_source
+           nutrition_source, conversion_estimated
     FROM food_logs
     ORDER BY logged_at DESC
     LIMIT ?
@@ -292,7 +399,7 @@ def get_daily_food_logs(
     sql = """
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
            state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
-           nutrition_source
+           nutrition_source, conversion_estimated
     FROM food_logs
     WHERE logged_at LIKE ? || '%'
     ORDER BY logged_at ASC
@@ -451,7 +558,7 @@ def get_food_logs_in_range(
     sql = f"""
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
            state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
-           nutrition_source
+           nutrition_source, conversion_estimated
     FROM food_logs
     {where_clause}
     ORDER BY logged_at ASC
@@ -818,7 +925,8 @@ def get_unified_records(
         cursor.execute(
             """
             SELECT id, logged_at, raw_input, food_name_matched, amount_g, state,
-                   calories, protein_raw, protein_usable, carbs, fats, nutrition_source
+                   calories, protein_raw, protein_usable, carbs, fats, nutrition_source,
+                   conversion_estimated
             FROM food_logs
             ORDER BY logged_at DESC
             """

@@ -117,6 +117,8 @@ Příklady vstupů:
 - `historie` pro zobrazení posledních záznamů
 - `vymaz` pro smazání dnešních záznamů, `vymaz vcera` nebo `vymaz 2026-09-15` pro jiný den
 - `jidlo kuřecí kari` pro zobrazení nebo opravu hodnot potraviny v katalogu
+- `jidla ai` pro výpis naučených potravin, `jidla smaz <nazev>` pro jejich smazání
+- `prevod svíčková porce 350` pro opravu hmotnosti kuchyňské míry
 
 Ukončení interaktivního režimu zadáním `konec`, `exit` nebo `quit`.
 
@@ -271,6 +273,37 @@ jidlo kuřecí kari 145 13 7 7         # přepíše kcal, bílkoviny, sacharidy,
 
 Hodnoty jsou vždy na 100 g, oddělovač může být i desetinná čárka. Oprava se vztahuje na budoucí záznamy; už zapsané dny se nepřepočítávají, aby historie zůstala konzistentní.
 
+### Správa katalogu
+
+```
+jidla                  # celý katalog
+jidla ai               # jen potraviny naučené odhadem
+jidla curated          # jen kurátorované potraviny
+jidla smaz máslo       # odebere potravinu z katalogu
+```
+
+Smazáním potraviny se nemažou už zapsané dny, jen se přestane nabízet pro nové záznamy.
+
+### Kuchyňské míry a jejich převod na gramy
+
+Parser zachová míru, kterou jsi napsal, a na gramy ji převádí až lokální kód. Model tedy nikdy neurčuje, kolik gramů má lžíce — jen rozpozná, že jsi lžíci použil.
+
+Převod se hledá v tomto pořadí:
+
+1. **Absolutní jednotky** — `g` a `ml` platí beze změny.
+2. **Kurátorovaná tabulka** — `lžíce` 13 g, `lžička` 5 g, `hrnek` 240 g, `odměrka` 30 g, `plátek` 20 g, `krajíc` 40 g. Kusové potraviny mají vlastní váhu: vejce 55 g, banán 120 g, jablko 150 g.
+3. **Naučené převody** — co se jednou odhadlo nebo zadal, se ukládá do tabulky `unit_conversions` a příště se použije stejná hodnota.
+4. **Odhad modelu** — teprve když nic z výše uvedeného neexistuje, zeptá se model. Výsledek se uloží a záznam se označí `[odhad převodu]`.
+
+Když model jednotku nezná, řekne to a záznam se odmítne s výzvou zadat gramy. Vymyšlená hodnota se neuloží.
+
+```
+prevod                                   # výpis naučených převodů
+prevod svíčková porce 350                # ruční oprava na 350 g za porci
+```
+
+Dřív kód u neznámé kusové potraviny tiše počítal 100 g a u porce 150 g. To vypadalo jako měření, ale byl to vymyšlený údaj — teď se místo toho počká na odhad nebo na tebe.
+
 ### Co model neumí
 
 - **DIAAS koeficient** se neodhaduje volně. Model vybere jednu z pěti kategorií bílkovin (`animal`, `plant_isolate`, `legumes`, `grains_seeds`, `nuts_peanuts`) a koeficient se dopočítá lokálně. Když si není jistý, použije se konzervativní `0.70`.
@@ -299,6 +332,7 @@ Když se i tak spustí odhad, znamená to, že v katalogu opravdu není nic pou�
 | `weight_logs` | Záznamy tělesné hmotnosti. |
 | `workout_logs` | Záznamy tréninků (typ, délka, poznámka). |
 | `foods` | Katalog potravin, kurátorovaný i odhadnutý, s vyhledávacím klíčem `name_key`. |
+| `unit_conversions` | Naučené převody kuchyňských měr na gramy pro konkrétní potraviny. |
 | `user_settings` | Aktivní cíl, typ dne a referenční hodnoty profilu. |
 
 Sloupec `name_key` drží název převedený na malá písmena přes Python, protože SQLite vestavěná kolace `NOCASE` skládá jen ASCII a `KUŘECÍ` by se s `kuřecí` neshodovalo.
