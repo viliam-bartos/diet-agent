@@ -537,10 +537,35 @@
       color: #B21F2D;
       display: none;
     }
+
+    /* Shown when the running server predates the loaded page. */
+    .stale-banner {
+      display: none;
+      background: #FDE8E8;
+      border: var(--border-technical);
+      border-color: #B21F2D;
+      color: #B21F2D;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .stale-banner code {
+      font-family: var(--font-mono);
+      background: rgba(178, 31, 45, 0.1);
+      padding: 1px 5px;
+    }
   </style>
 </head>
 <body>
   <div class="container">
+    <div id="staleBanner" class="stale-banner">
+      <strong>Server běží se starou verzí.</strong>
+      <span id="staleBannerDetail"></span>
+      Zavři okno se serverem a spusť znovu <code>start.bat</code>.
+    </div>
+
     <header>
       <div class="brand-title">Nutrition Agent</div>
       <div class="status-badge">
@@ -732,10 +757,35 @@
       targetEl.className = 'kpi-subtext';
     }
 
+    const PAGE_VERSION = '{{APP_VERSION}}';
+
+    const REQUIRED_KPI_FIELDS = [
+      'avg_calories', 'target_calories',
+      'avg_protein_diaas', 'target_protein',
+      'avg_carbs', 'target_carbs',
+      'avg_fats', 'target_fats',
+      'version'
+    ];
+
+    function showStaleBanner(detail) {
+      document.getElementById('staleBannerDetail').textContent = detail + ' ';
+      document.getElementById('staleBanner').style.display = 'block';
+    }
+
     async function loadKpis() {
       try {
         const res = await fetch(`/api/kpis?period=${currentTimeframe}`);
         const data = await res.json();
+
+        const missing = REQUIRED_KPI_FIELDS.filter(field => !(field in data));
+        if (missing.length > 0 || (data.version && data.version !== PAGE_VERSION)) {
+          const detail = missing.length > 0
+            ? `Chybí pole: ${missing.join(', ')}.`
+            : `Web je ${PAGE_VERSION}, server ${data.version}.`;
+          showStaleBanner(detail);
+        } else {
+          document.getElementById('staleBanner').style.display = 'none';
+        }
 
         document.getElementById('activeGoalDisplay').textContent = `${data.goal.toUpperCase()} // ${data.day_type.toUpperCase()}`;
         document.getElementById('kpiWeight').textContent = data.current_weight != null ? data.current_weight.toFixed(1) : '--';
@@ -991,6 +1041,16 @@
       document.getElementById('editDialog').close();
     }
 
+    // The old server answers unknown routes with the English "Not Found" body.
+    function describeApiError(detail, fallback) {
+      if (detail && detail.detail === 'Not Found') {
+        showStaleBanner('Server nezná tuto operaci.');
+        return 'Server běží se starou verzí a tuto operaci nezná. Restartuj start.bat.';
+      }
+      if (detail && typeof detail.detail === 'string') return detail.detail;
+      return fallback;
+    }
+
     async function submitEdit(e) {
       e.preventDefault();
       if (!editingRecord) return;
@@ -1016,9 +1076,7 @@
 
         if (!res.ok) {
           const detail = await res.json().catch(() => ({}));
-          errorEl.textContent = typeof detail.detail === 'string'
-            ? detail.detail
-            : 'Záznam se nepodařilo uložit.';
+          errorEl.textContent = describeApiError(detail, 'Záznam se nepodařilo uložit.');
           errorEl.style.display = 'block';
           return;
         }
@@ -1039,7 +1097,7 @@
         const res = await fetch(`/api/records/${recordType}/${recordId}`, { method: 'DELETE' });
         if (!res.ok) {
           const detail = await res.json().catch(() => ({}));
-          alert(typeof detail.detail === 'string' ? detail.detail : 'Záznam se nepodařilo smazat.');
+          alert(describeApiError(detail, 'Záznam se nepodařilo smazat.'));
           return;
         }
         fetchData();

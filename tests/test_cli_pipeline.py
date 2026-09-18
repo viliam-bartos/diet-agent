@@ -500,3 +500,27 @@ def test_start_bat_exists_and_calls_run_all() -> None:
     assert "--open-browser" in content
     assert ".venv\\Scripts\\python.exe" in content
     assert "pause" in content
+
+
+def test_start_bat_stops_a_leftover_instance() -> None:
+    """A stale server holding the port must be stopped before starting a new one.
+
+    Otherwise the new process fails to bind with WinError 10048, the old one keeps
+    answering requests, and the browser silently talks to outdated code. That is how
+    the dashboard ended up with missing carb and fat cards plus 'Not Found' errors.
+    """
+    from pathlib import Path
+
+    content = (Path(__file__).resolve().parent.parent / "start.bat").read_text(encoding="ascii")
+
+    assert "netstat -ano" in content
+    assert "taskkill /F /T /PID" in content
+    assert "WEB_PORT" in content
+    # The port is read from .env rather than hardcoded
+    assert 'if /i "%%a"=="WEB_PORT"' in content
+    # Killing returns before the socket is released, so the script must poll
+    assert ":wait_port" in content
+    assert "GEQ 15" in content
+    assert "se nepodarilo uvolnit" in content
+    # TIME_WAIT lines carry PID 0 and must not be killed
+    assert '"0"' in content

@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from nutrition_agent import __version__
 from nutrition_agent.cli import handle_user_message
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
@@ -128,7 +129,14 @@ def create_app() -> FastAPI:
         template_path = TEMPLATES_DIR / "dashboard.html"
         if not template_path.exists():
             return HTMLResponse("<h1>Šablona dashboard.html nebyla nalezena.</h1>", status_code=404)
-        return HTMLResponse(template_path.read_text(encoding="utf-8"))
+
+        page = template_path.read_text(encoding="utf-8").replace("{{APP_VERSION}}", __version__)
+        # The dashboard must never be served from a stale browser cache.
+        return HTMLResponse(page, headers={"Cache-Control": "no-store, must-revalidate"})
+
+    @app.get("/api/version")
+    async def api_version():
+        return {"version": __version__}
 
     @app.get("/api/kpis")
     async def api_kpis(period: str = Query("30d")):
@@ -148,6 +156,7 @@ def create_app() -> FastAPI:
             )
             kpis["target_carbs"] = targets.carbs
             kpis["target_fats"] = targets.fats
+            kpis["version"] = __version__
             return kpis
         finally:
             conn.close()

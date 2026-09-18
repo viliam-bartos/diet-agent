@@ -90,7 +90,11 @@ Po instalaci stačí dvojkliknout na **`start.bat`** v kořeni projektu. Skript:
 
 Ukončení: `Ctrl+C` v okně, případně potvrď `Y`. Při chybějící konfiguraci skript vypíše, který příkaz máš spustit, a okno nechá otevřené.
 
+Skript před spuštěním **ukončí předchozí instanci**, která by jinak držela port. Bez toho by nový server nedokázal obsadit port, spadl by a prohlížeč by dál mluvil se starým procesem — navenek by to vypadalo, že aplikace ignoruje nový kód.
+
 Ekvivalentní příkaz pro ruční spuštění je `nutrition-agent --run-all --open-browser`.
+
+Když dashboard zobrazí červený pruh „Server běží se starou verzí“, znamená to, že běžící proces je starší než načtená stránka. Zavři jeho okno a spusť `start.bat` znovu.
 
 ---
 

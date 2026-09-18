@@ -132,6 +132,49 @@ def test_dashboard_html_served(api_client: TestClient):
     assert 'id="editDialog"' in body
 
 
+def test_dashboard_reports_its_version_and_disables_caching(api_client: TestClient):
+    """A stale server must be detectable, and the page must never be cached.
+
+    Without this, a browser could pair freshly rendered markup with an older API,
+    which showed up as empty carb and fat cards plus 'Not Found' on edits.
+    """
+    from nutrition_agent import __version__
+
+    response = api_client.get("/")
+    assert response.headers["cache-control"] == "no-store, must-revalidate"
+
+    body = response.text
+    assert "{{APP_VERSION}}" not in body
+    assert f"'{__version__}'" in body
+    assert 'id="staleBanner"' in body
+    assert "describeApiError" in body
+
+    assert api_client.get("/api/version").json() == {"version": __version__}
+
+
+def test_kpis_payload_carries_version_and_every_card_field(api_client: TestClient):
+    """The KPI response must satisfy every field the cards read."""
+    from nutrition_agent import __version__
+
+    data = api_client.get("/api/kpis", params={"period": "30d"}).json()
+
+    required = (
+        "avg_calories",
+        "target_calories",
+        "avg_protein_diaas",
+        "target_protein",
+        "avg_carbs",
+        "target_carbs",
+        "avg_fats",
+        "target_fats",
+        "version",
+    )
+    for field in required:
+        assert field in data, field
+
+    assert data["version"] == __version__
+
+
 def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):
     """Legend swatches must actually get the level colours.
 
