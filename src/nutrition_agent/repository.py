@@ -951,6 +951,10 @@ def get_unified_records(
                     "protein_usable": row["protein_usable"],
                     "carbs": row["carbs"],
                     "fats": row["fats"],
+                    "amount_g": row["amount_g"],
+                    "state": row["state"],
+                    "nutrition_source": row["nutrition_source"],
+                    "conversion_estimated": bool(row["conversion_estimated"]),
                 }
             )
 
@@ -991,7 +995,9 @@ def get_unified_records(
                     "title": f"{row['workout_type']}{dur_str}",
                     "subtitle": row["notes"] or f"Záznam: '{row['raw_input']}'",
                     "raw_input": row["raw_input"],
+                    "workout_type": row["workout_type"],
                     "duration_minutes": row["duration_minutes"],
+                    "notes": row["notes"],
                 }
             )
 
@@ -1043,3 +1049,146 @@ def delete_day_logs(conn: sqlite3.Connection, date_prefix: str) -> dict[str, int
         deleted[key] = int(cursor.rowcount)
     conn.commit()
     return deleted
+
+
+def get_food_log(conn: sqlite3.Connection, log_id: int) -> CalculatedFoodLog | None:
+    """Fetch a single food log by id."""
+    row = conn.execute(
+        """
+        SELECT id, logged_at, raw_input, food_name_matched, amount_g,
+               state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+               nutrition_source, conversion_estimated
+        FROM food_logs WHERE id = ?
+        """,
+        (log_id,),
+    ).fetchone()
+    return _row_to_food_log(row) if row is not None else None
+
+
+def get_weight_log(conn: sqlite3.Connection, log_id: int) -> CalculatedWeightLog | None:
+    """Fetch a single weight log by id."""
+    row = conn.execute(
+        "SELECT id, logged_at, raw_input, weight_kg FROM weight_logs WHERE id = ?",
+        (log_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return CalculatedWeightLog(
+        id=row["id"],
+        logged_at=row["logged_at"],
+        raw_input=row["raw_input"],
+        weight_kg=row["weight_kg"],
+    )
+
+
+def get_workout_log(conn: sqlite3.Connection, log_id: int) -> CalculatedWorkoutLog | None:
+    """Fetch a single workout log by id."""
+    row = conn.execute(
+        """
+        SELECT id, logged_at, raw_input, workout_type, duration_minutes, notes
+        FROM workout_logs WHERE id = ?
+        """,
+        (log_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return CalculatedWorkoutLog(
+        id=row["id"],
+        logged_at=row["logged_at"],
+        raw_input=row["raw_input"],
+        workout_type=row["workout_type"],
+        duration_minutes=row["duration_minutes"],
+        notes=row["notes"],
+    )
+
+
+def update_food_log(conn: sqlite3.Connection, log: CalculatedFoodLog) -> CalculatedFoodLog:
+    """Overwrite a stored food log, including its recomputed macros."""
+    if log.id is None:
+        raise ValueError("Pro aktualizaci musí mít záznam své id.")
+
+    cursor = conn.execute(
+        """
+        UPDATE food_logs
+        SET food_name_matched = ?, amount_g = ?, state = ?, is_estimated = ?,
+            calories = ?, protein_raw = ?, protein_usable = ?, carbs = ?, fats = ?,
+            nutrition_source = ?, conversion_estimated = ?
+        WHERE id = ?
+        """,
+        (
+            log.food_name_matched,
+            log.amount_g,
+            log.state,
+            1 if log.is_estimated else 0,
+            log.calories,
+            log.protein_raw,
+            log.protein_usable,
+            log.carbs,
+            log.fats,
+            log.nutrition_source,
+            1 if log.conversion_estimated else 0,
+            log.id,
+        ),
+    )
+    conn.commit()
+    if cursor.rowcount == 0:
+        raise LookupError(f"Záznam jídla {log.id} nebyl nalezen.")
+    return log
+
+
+def update_weight_log(conn: sqlite3.Connection, log: CalculatedWeightLog) -> CalculatedWeightLog:
+    """Overwrite a stored weight log."""
+    if log.id is None:
+        raise ValueError("Pro aktualizaci musí mít záznam své id.")
+
+    cursor = conn.execute(
+        "UPDATE weight_logs SET weight_kg = ? WHERE id = ?",
+        (log.weight_kg, log.id),
+    )
+    conn.commit()
+    if cursor.rowcount == 0:
+        raise LookupError(f"Záznam váhy {log.id} nebyl nalezen.")
+    return log
+
+
+def update_workout_log(
+    conn: sqlite3.Connection,
+    log: CalculatedWorkoutLog,
+) -> CalculatedWorkoutLog:
+    """Overwrite a stored workout log."""
+    if log.id is None:
+        raise ValueError("Pro aktualizaci musí mít záznam své id.")
+
+    cursor = conn.execute(
+        """
+        UPDATE workout_logs
+        SET workout_type = ?, duration_minutes = ?, notes = ?
+        WHERE id = ?
+        """,
+        (log.workout_type, log.duration_minutes, log.notes, log.id),
+    )
+    conn.commit()
+    if cursor.rowcount == 0:
+        raise LookupError(f"Záznam tréninku {log.id} nebyl nalezen.")
+    return log
+
+
+def delete_food_log(conn: sqlite3.Connection, log_id: int) -> bool:
+    """Delete a single food log. Returns True when a row was removed."""
+    cursor = conn.execute("DELETE FROM food_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def delete_weight_log(conn: sqlite3.Connection, log_id: int) -> bool:
+    """Delete a single weight log. Returns True when a row was removed."""
+    cursor = conn.execute("DELETE FROM weight_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def delete_workout_log(conn: sqlite3.Connection, log_id: int) -> bool:
+    """Delete a single workout log. Returns True when a row was removed."""
+    cursor = conn.execute("DELETE FROM workout_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    return cursor.rowcount > 0

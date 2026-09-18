@@ -2,32 +2,89 @@
 
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from nutrition_agent.cli import handle_user_message
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
+from nutrition_agent.models import (
+    MAX_WEIGHT_KG,
+    MIN_WEIGHT_KG,
+    CalculatedWorkoutLog,
+)
+from nutrition_agent.nutrition import recalculate_food_log, validate_body_weight
 from nutrition_agent.repository import (
+    delete_food_log,
+    delete_weight_log,
+    delete_workout_log,
     ensure_food_catalog,
     get_dashboard_kpis,
+    get_food,
+    get_food_log,
     get_heatmap_data,
     get_unified_records,
     get_user_profile,
+    get_weight_log,
     get_weight_trend,
+    get_workout_log,
     load_foods,
+    update_food_log,
+    update_weight_log,
+    update_workout_log,
 )
 from nutrition_agent.targets import calculate_daily_targets
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+RecordType = Literal["food", "weight", "workout"]
 
 
 class MessagePayload(BaseModel):
     """Incoming user message payload."""
 
     message: str
+
+
+class FoodLogEdit(BaseModel):
+    """Editable fields of a stored food log."""
+
+    amount_g: float
+    state: Literal["raw", "cooked"] = "raw"
+
+    @field_validator("amount_g")
+    @classmethod
+    def validate_amount(cls, value: float) -> float:
+        """Grams must be positive (Fail Fast)."""
+        if value <= 0:
+            raise ValueError("Hmotnost musí být kladné číslo.")
+        return value
+
+
+class WeightLogEdit(BaseModel):
+    """Editable fields of a stored weight log."""
+
+    weight_kg: float
+
+    @field_validator("weight_kg")
+    @classmethod
+    def validate_weight(cls, value: float) -> float:
+        """Weight must stay within the physiological range (Fail Fast)."""
+        try:
+            return validate_body_weight(value)
+        except ValueError as exc:
+            raise ValueError(f"Povolený rozsah je {MIN_WEIGHT_KG} až {MAX_WEIGHT_KG} kg.") from exc
+
+
+class WorkoutLogEdit(BaseModel):
+    """Editable fields of a stored workout log."""
+
+    workout_type: str = Field(min_length=1)
+    duration_minutes: int | None = Field(default=None, ge=1, le=1440)
+    notes: str | None = None
 
 
 def _resolve_period_dates(period: str) -> tuple[str | None, str | None]:
@@ -136,6 +193,46 @@ def create_app() -> FastAPI:
         finally:
             conn.close()
 
+    @app.patch("/api/records/{record_type}/{record_id}")
+    async def api_update_record(
+        record_type: RecordType,
+        record_id: int,
+        payload: dict,
+    ):
+        conn = get_connection(settings.database_path)
+        try:
+            try:
+                if record_type == "food":
+                    food_edit = FoodLogEdit.model_validate(payload)
+                    return _update_food_record(conn, record_id, food_edit)
+                if record_type == "weight":
+                    weight_edit = WeightLogEdit.model_validate(payload)
+                    return _update_weight_record(conn, record_id, weight_edit)
+                workout_edit = WorkoutLogEdit.model_validate(payload)
+                return _update_workout_record(conn, record_id, workout_edit)
+            except ValidationError as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=_first_error_message(exc),
+                ) from exc
+        finally:
+            conn.close()
+
+    @app.delete("/api/records/{record_type}/{record_id}")
+    async def api_delete_record(record_type: RecordType, record_id: int):
+        conn = get_connection(settings.database_path)
+        try:
+            deleters = {
+                "food": delete_food_log,
+                "weight": delete_weight_log,
+                "workout": delete_workout_log,
+            }
+            if not deleters[record_type](conn, record_id):
+                raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
+            return {"deleted": True, "type": record_type, "id": record_id}
+        finally:
+            conn.close()
+
     @app.post("/api/message")
     async def api_message(payload: MessagePayload):
         conn = get_connection(settings.database_path)
@@ -148,6 +245,80 @@ def create_app() -> FastAPI:
             conn.close()
 
     return app
+
+
+def _first_error_message(error: ValidationError) -> str:
+    """Turn a Pydantic validation error into one readable sentence."""
+    first = error.errors()[0]
+    field = ".".join(str(part) for part in first.get("loc", ())) or "vstup"
+    return f"Neplatná hodnota pole '{field}': {first.get('msg', 'chyba validace')}"
+
+
+def _update_food_record(conn, record_id: int, edit: FoodLogEdit) -> dict[str, object]:
+    """Recompute and store an edited food log."""
+    existing = get_food_log(conn, record_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
+
+    food_def = get_food(conn, existing.food_name_matched)
+    if food_def is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Potravina '{existing.food_name_matched}' už není v katalogu, "
+                "takže nelze přepočítat makra."
+            ),
+        )
+
+    updated = recalculate_food_log(existing, food_def, edit.amount_g, edit.state)
+    update_food_log(conn, updated)
+    return {
+        "id": updated.id,
+        "amount_g": updated.amount_g,
+        "state": updated.state,
+        "calories": updated.calories,
+        "protein_usable": updated.protein_usable,
+        "carbs": updated.carbs,
+        "fats": updated.fats,
+    }
+
+
+def _update_weight_record(conn, record_id: int, edit: WeightLogEdit) -> dict[str, object]:
+    """Store an edited weight log."""
+    existing = get_weight_log(conn, record_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
+
+    updated = existing.model_copy(update={"weight_kg": edit.weight_kg})
+    update_weight_log(conn, updated)
+    return {"id": updated.id, "weight_kg": updated.weight_kg}
+
+
+def _update_workout_record(
+    conn,
+    record_id: int,
+    edit: WorkoutLogEdit,
+) -> dict[str, object]:
+    """Store an edited workout log."""
+    existing = get_workout_log(conn, record_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
+
+    updated = CalculatedWorkoutLog(
+        id=existing.id,
+        logged_at=existing.logged_at,
+        raw_input=existing.raw_input,
+        workout_type=edit.workout_type,
+        duration_minutes=edit.duration_minutes,
+        notes=edit.notes,
+    )
+    update_workout_log(conn, updated)
+    return {
+        "id": updated.id,
+        "workout_type": updated.workout_type,
+        "duration_minutes": updated.duration_minutes,
+        "notes": updated.notes,
+    }
 
 
 def run_server(host: str | None = None, port: int | None = None) -> None:

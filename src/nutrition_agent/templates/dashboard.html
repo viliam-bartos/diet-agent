@@ -66,13 +66,6 @@
       text-transform: uppercase;
     }
 
-    .brand-subtitle {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--ink-secondary);
-      letter-spacing: 0.5px;
-    }
-
     .status-badge {
       display: inline-flex;
       align-items: center;
@@ -277,6 +270,8 @@
       width: 12px;
       height: 12px;
       border: 1px solid rgba(24, 24, 26, 0.3);
+      border-radius: 2px;
+      flex: 0 0 auto;
     }
 
     .heatmap-grid {
@@ -300,10 +295,12 @@
       cursor: pointer;
     }
 
-    .heatmap-cell.level-empty { background: #E6DFC5; }
-    .heatmap-cell.level-green { background: #38A169; border-color: #2F855A; }
-    .heatmap-cell.level-blue { background: #3182CE; border-color: #2B6CB0; }
-    .heatmap-cell.level-amber { background: #DD6B20; border-color: #C05621; }
+    /* Level classes are standalone so both heatmap cells and legend swatches pick them up. */
+    .level-empty { background: #E6DFC5; }
+    .level-green { background: #38A169; border-color: #2F855A; }
+    .level-blue { background: #3182CE; border-color: #2B6CB0; }
+    .level-amber { background: #DD6B20; border-color: #C05621; }
+
     .heatmap-cell.has-workout::after {
       content: '';
       position: absolute;
@@ -393,15 +390,136 @@
       padding: 6px 12px;
       font-size: 12px;
     }
+
+    .legend-workout {
+      background: #FFFFFF;
+      position: relative;
+    }
+
+    .legend-workout::after {
+      content: '';
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      background: var(--ink-primary);
+      border-radius: 50%;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    /* Row actions */
+    .row-actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .row-actions button {
+      padding: 4px 10px;
+      font-size: 11px;
+      letter-spacing: 0.3px;
+    }
+
+    .btn-edit {
+      background: var(--bg-sheet);
+    }
+
+    .btn-delete {
+      background: #FDE8E8;
+      border-color: #B21F2D;
+      color: #B21F2D;
+    }
+
+    .btn-delete:hover {
+      background: #B21F2D;
+      color: #fff;
+    }
+
+    /* Edit dialog */
+    dialog {
+      border: var(--border-technical);
+      background: var(--bg-sheet);
+      color: var(--ink-primary);
+      padding: 0;
+      box-shadow: 6px 6px 0px rgba(24, 24, 26, 0.85);
+      max-width: 460px;
+      width: calc(100% - 32px);
+    }
+
+    dialog::backdrop {
+      background: rgba(24, 24, 26, 0.35);
+    }
+
+    .dialog-header {
+      padding: 14px 18px;
+      border-bottom: var(--border-subtle);
+      font-size: 16px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .dialog-body {
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .field {
+      display: grid;
+      gap: 5px;
+    }
+
+    .field label {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      color: var(--ink-secondary);
+      letter-spacing: 0.5px;
+    }
+
+    .field input,
+    .field select {
+      padding: 8px 10px;
+      font-family: var(--font-mono);
+      font-size: 14px;
+      background: var(--bg-paper);
+      border: var(--border-subtle);
+      color: var(--ink-primary);
+    }
+
+    .field input:focus,
+    .field select:focus {
+      outline: none;
+      border: var(--border-technical);
+    }
+
+    .field-hint {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-muted);
+    }
+
+    .dialog-footer {
+      padding: 14px 18px;
+      border-top: var(--border-subtle);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .dialog-error {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #B21F2D;
+      display: none;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <div>
-        <div class="brand-title">Nutrition Agent // Core</div>
-        <div class="brand-subtitle">DIAAS Usable Protein & Energy Telemetry</div>
-      </div>
+      <div class="brand-title">Nutrition Agent</div>
       <div class="status-badge">
         <span class="badge-dot"></span>
         <span id="activeGoalDisplay">LEAN_BULK // TRAINING</span>
@@ -454,8 +572,7 @@
     <!-- Weight Trend Chart -->
     <div class="dashboard-section">
       <div class="section-header">
-        <div class="section-title">Vývoj tělesné hmotnosti & 7denní klouzavý průměr</div>
-        <div class="brand-subtitle">Body jednotlivých vážení + hladký trend</div>
+        <div class="section-title">Vývoj tělesné hmotnosti</div>
       </div>
       <div style="height: 320px; width: 100%;">
         <canvas id="weightChart"></canvas>
@@ -466,7 +583,6 @@
     <div class="dashboard-section">
       <div class="section-header">
         <div class="section-title">Adherence kalendář & tréninky</div>
-        <div class="brand-subtitle">GitHub-style matice plnění nutričních cílů</div>
       </div>
       <div class="heatmap-container">
         <div id="heatmapGrid" class="heatmap-grid"></div>
@@ -476,7 +592,7 @@
         <div class="legend-item"><div class="legend-box level-blue"></div> Splněné bílkoviny</div>
         <div class="legend-item"><div class="legend-box level-amber"></div> Záznam pod cílem</div>
         <div class="legend-item"><div class="legend-box level-empty"></div> Bez záznamu</div>
-        <div class="legend-item"><div class="legend-box" style="background:#FFF; position:relative;"><div style="width:4px;height:4px;background:#18181A;border-radius:50%;margin:3px auto;"></div></div> Bílý bod = Tréninkový den</div>
+        <div class="legend-item"><div class="legend-box legend-workout"></div> Tréninkový den</div>
       </div>
     </div>
 
@@ -502,10 +618,11 @@
               <th>Položka / Název</th>
               <th>Detaily / Nutrienty</th>
               <th>Původní text</th>
+              <th style="width: 150px;">Akce</th>
             </tr>
           </thead>
           <tbody id="recordsBody">
-            <tr><td colspan="5" style="text-align: center; color: var(--ink-muted);">Načítám data...</td></tr>
+            <tr><td colspan="6" style="text-align: center; color: var(--ink-muted);">Načítám data...</td></tr>
           </tbody>
         </table>
       </div>
@@ -516,6 +633,20 @@
       </div>
     </div>
   </div>
+
+  <dialog id="editDialog">
+    <div class="dialog-header" id="editDialogTitle">Upravit záznam</div>
+    <form id="editForm" onsubmit="submitEdit(event)">
+      <div class="dialog-body" id="editDialogBody"></div>
+      <div class="dialog-body" style="padding-top: 0;">
+        <div class="dialog-error" id="editDialogError"></div>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" onclick="closeEditDialog()">Zrušit</button>
+        <button type="submit" class="btn-primary">Uložit</button>
+      </div>
+    </form>
+  </dialog>
 
   <script>
     let currentTimeframe = '30d';
@@ -685,7 +816,7 @@
         tbody.innerHTML = '';
 
         if (!data.items || data.items.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--ink-muted); font-family: var(--font-mono);">Nebyly nalezeny žádné záznamy.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--ink-muted); font-family: var(--font-mono);">Nebyly nalezeny žádné záznamy.</td></tr>';
           return;
         }
 
@@ -698,6 +829,12 @@
             <td style="font-weight: 600;">${r.title}</td>
             <td style="color: var(--ink-secondary); font-family: var(--font-mono); font-size: 12px;">${r.subtitle}</td>
             <td style="color: var(--ink-muted); font-style: italic; font-size: 13px;">${r.raw_input || ''}</td>
+            <td>
+              <div class="row-actions">
+                <button class="btn-edit" onclick="openEditDialog(${JSON.stringify(r).replace(/"/g, '&quot;')})">Upravit</button>
+                <button class="btn-delete" onclick="deleteRecord('${r.type}', ${r.id})">Smazat</button>
+              </div>
+            </td>
           `;
           tbody.appendChild(tr);
         });
@@ -714,6 +851,150 @@
       currentPage += delta;
       loadRecords();
     }
+
+    // --- Record editing and deletion ---
+
+    let editingRecord = null;
+
+    function buildEditFields(record) {
+      if (record.type === 'food') {
+        return `
+          <div class="field">
+            <label for="editAmount">Hmotnost (g)</label>
+            <input type="number" id="editAmount" step="0.1" min="0.1" value="${record.amount_g}" required>
+            <div class="field-hint">Makra a kalorie se přepočítají z hodnot potraviny.</div>
+          </div>
+          <div class="field">
+            <label for="editState">Stav</label>
+            <select id="editState">
+              <option value="raw"${record.state === 'raw' ? ' selected' : ''}>raw (syrové)</option>
+              <option value="cooked"${record.state === 'cooked' ? ' selected' : ''}>cooked (vařené)</option>
+            </select>
+          </div>
+        `;
+      }
+      if (record.type === 'weight') {
+        return `
+          <div class="field">
+            <label for="editWeight">Hmotnost (kg)</label>
+            <input type="number" id="editWeight" step="0.1" min="30" max="300" value="${record.weight_kg}" required>
+          </div>
+        `;
+      }
+      return `
+        <div class="field">
+          <label for="editWorkoutType">Typ tréninku</label>
+          <input type="text" id="editWorkoutType" value="${record.workout_type || ''}" required>
+        </div>
+        <div class="field">
+          <label for="editDuration">Délka (min)</label>
+          <input type="number" id="editDuration" step="1" min="1" value="${record.duration_minutes ?? ''}">
+        </div>
+        <div class="field">
+          <label for="editNotes">Poznámka</label>
+          <input type="text" id="editNotes" value="${record.notes || ''}">
+        </div>
+      `;
+    }
+
+    function collectEditPayload(record) {
+      if (record.type === 'food') {
+        return {
+          amount_g: parseFloat(document.getElementById('editAmount').value),
+          state: document.getElementById('editState').value
+        };
+      }
+      if (record.type === 'weight') {
+        return { weight_kg: parseFloat(document.getElementById('editWeight').value) };
+      }
+      const durationRaw = document.getElementById('editDuration').value.trim();
+      return {
+        workout_type: document.getElementById('editWorkoutType').value.trim(),
+        duration_minutes: durationRaw === '' ? null : parseInt(durationRaw, 10),
+        notes: document.getElementById('editNotes').value.trim() || null
+      };
+    }
+
+    const TYPE_LABELS = { food: 'jídlo', weight: 'vážení', workout: 'trénink' };
+
+    function openEditDialog(record) {
+      editingRecord = record;
+      document.getElementById('editDialogTitle').textContent =
+        `Upravit ${TYPE_LABELS[record.type] || record.type}`;
+      document.getElementById('editDialogBody').innerHTML = buildEditFields(record);
+
+      const errorEl = document.getElementById('editDialogError');
+      errorEl.style.display = 'none';
+      errorEl.textContent = '';
+
+      document.getElementById('editDialog').showModal();
+    }
+
+    function closeEditDialog() {
+      editingRecord = null;
+      document.getElementById('editDialog').close();
+    }
+
+    async function submitEdit(e) {
+      e.preventDefault();
+      if (!editingRecord) return;
+
+      const errorEl = document.getElementById('editDialogError');
+      errorEl.style.display = 'none';
+
+      let payload;
+      try {
+        payload = collectEditPayload(editingRecord);
+      } catch (err) {
+        errorEl.textContent = 'Neplatné hodnoty ve formuláři.';
+        errorEl.style.display = 'block';
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/records/${editingRecord.type}/${editingRecord.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          errorEl.textContent = typeof detail.detail === 'string'
+            ? detail.detail
+            : 'Záznam se nepodařilo uložit.';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        closeEditDialog();
+        fetchData();
+      } catch (err) {
+        errorEl.textContent = 'Chyba při ukládání: ' + err;
+        errorEl.style.display = 'block';
+      }
+    }
+
+    async function deleteRecord(recordType, recordId) {
+      const label = TYPE_LABELS[recordType] || recordType;
+      if (!confirm(`Opravdu smazat tento záznam (${label})?`)) return;
+
+      try {
+        const res = await fetch(`/api/records/${recordType}/${recordId}`, { method: 'DELETE' });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          alert(typeof detail.detail === 'string' ? detail.detail : 'Záznam se nepodařilo smazat.');
+          return;
+        }
+        fetchData();
+      } catch (err) {
+        alert('Chyba při mazání: ' + err);
+      }
+    }
+
+    document.getElementById('editDialog').addEventListener('click', (event) => {
+      if (event.target.id === 'editDialog') closeEditDialog();
+    });
 
     async function submitLog(e) {
       e.preventDefault();

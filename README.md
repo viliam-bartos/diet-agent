@@ -229,6 +229,8 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 | `GET /api/weight-trend?period=` | Body jednotlivých vážení a 7denní klouzavý průměr pro Chart.js. |
 | `GET /api/heatmap?period=` | Kalendářní adherence heatmapa po dnech. |
 | `GET /api/records?type=&limit=&offset=` | Stránkovaná a filtrovaná historie (jídla, váha, trénink). |
+| `PATCH /api/records/{typ}/{id}` | Úprava záznamu. U jídla se přepočítají makra z nové gramáže. |
+| `DELETE /api/records/{typ}/{id}` | Smazání jednoho záznamu. |
 | `POST /api/message` | Zpracuje textovou zprávu stejnou pipeline jako CLI a vrátí odpověď. |
 
 Parametr `period` přijímá `7d`, `30d`, `90d`, `180d`, `365d` a `all`.
@@ -239,7 +241,7 @@ Parametr `period` přijímá `7d`, `30d`, `90d`, `180d`, `365d` a `all`.
 - **KPI karty**: aktuální váha s deltou za zvolené období, průměrný denní příjem kalorií a využitelných bílkovin (DIAAS), celkový počet odtrénovaných dní.
 - **Interaktivní graf váhy** (Chart.js): body jednotlivých vážení a spojitá čára 7denního klouzavého průměru.
 - **Kalendářní heatmapa** ve stylu GitHubu: zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den.
-- **Tabulka záznamů**: stránkování, filtrování podle typu a zobrazení původního textu záznamu.
+- **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění jen gramáž a stav, makra a kalorie se přepočítají z hodnot potraviny, aby čísla zůstala konzistentní.
 
 Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--aperture-cyan` s fonty Barlow Semi Condensed a Space Mono.
 

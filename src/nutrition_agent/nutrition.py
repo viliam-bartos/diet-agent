@@ -360,6 +360,43 @@ def calculate_food_log(
     )
 
 
+def recalculate_food_log(
+    existing: CalculatedFoodLog,
+    food_def: FoodDefinition,
+    amount_g: float,
+    state: str,
+) -> CalculatedFoodLog:
+    """Rebuild a stored food log from a new amount, keeping macros consistent.
+
+    Editing only the amount would leave calories and protein stale, so the whole
+    log is recomputed from the food definition instead.
+    """
+    if amount_g <= 0:
+        raise ValueError("Hmotnost potraviny musí být kladné číslo.")
+
+    if state == "cooked":
+        raw_equivalent_g = amount_g * get_cooked_to_raw_ratio(food_def.name)
+    else:
+        raw_equivalent_g = amount_g
+
+    multiplier = raw_equivalent_g / 100.0
+    protein_raw = round(food_def.protein * multiplier, 2)
+
+    return existing.model_copy(
+        update={
+            "food_name_matched": food_def.name,
+            "amount_g": round(amount_g, 1),
+            "state": state,
+            "calories": round(food_def.calories * multiplier, 1),
+            "protein_raw": protein_raw,
+            "protein_usable": calculate_usable_protein(protein_raw, food_def.diaas_coefficient),
+            "carbs": round(food_def.carbs * multiplier, 2),
+            "fats": round(food_def.fats * multiplier, 2),
+            "nutrition_source": food_def.source,
+        }
+    )
+
+
 def build_food_from_estimate(estimate: EstimatedFoodNutrition) -> FoodDefinition:
     """Turn an LLM nutrition estimate into a food definition flagged as AI-sourced."""
     if estimate.calories <= 0 and estimate.protein <= 0 and estimate.carbs <= 0:

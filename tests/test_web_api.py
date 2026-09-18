@@ -125,6 +125,42 @@ def test_dashboard_html_served(api_client: TestClient):
     assert "1 rok" in body
     assert "Vše" in body
 
+    # Row actions for editing and deleting records
+    assert "Akce" in body
+    assert "openEditDialog" in body
+    assert "deleteRecord" in body
+    assert 'id="editDialog"' in body
+
+
+def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):
+    """Legend swatches must actually get the level colours.
+
+    The rules used to be scoped as '.heatmap-cell.level-green', so the legend
+    swatches rendered as empty boxes while the labels still showed.
+    """
+    body = api_client.get("/").text
+
+    for level in ("green", "blue", "amber", "empty"):
+        assert f"legend-box level-{level}" in body
+        # The colour rule must be standalone, not scoped to heatmap cells only
+        assert f".heatmap-cell.level-{level} " not in body
+        assert f".level-{level} {{" in body or f".level-{level} {{ " in body
+
+    assert ".level-green { background: #38A169" in body
+    assert ".level-blue { background: #3182CE" in body
+    assert ".level-amber { background: #DD6B20" in body
+    assert ".level-empty { background: #E6DFC5" in body
+
+
+def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):
+    """Descriptive subtitles were removed from the section headers."""
+    body = api_client.get("/").text
+
+    assert "GitHub-style" not in body
+    assert "DIAAS Usable Protein & Energy Telemetry" not in body
+    assert "Body jednotlivých vážení" not in body
+    assert 'class="brand-subtitle"' not in body
+
 
 def test_api_kpis_endpoint(api_client: TestClient):
     """KPI endpoint returns weights, averages and configured targets."""
