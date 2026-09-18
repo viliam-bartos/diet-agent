@@ -279,6 +279,16 @@ Hodnoty jsou vždy na 100 g, oddělovač může být i desetinná čárka. Oprav
 
 Tyto hodnoty jsou odhad, ne měření. Přesnost je u základních surovin vysoká, u složených jídel klidně ±30 %.
 
+### Kdy se model vůbec nevolá
+
+Párování je tolerantní, aby se odhad zbytečně nespouštěl u potravin, které v katalogu jsou:
+
+- **Kratší název než v katalogu.** `máslo` se spáruje s `Máslo 82%`, `cfm protein` s `Prom-IN CFM Pure Performance (syrovátkový protein)`. Stačí, když jsou všechna slova z dotazu obsažena v názvu potraviny.
+- **Bez diakritiky.** `maslo`, `sunka`, `ryze`, `kureci prsa` se přeloží na správné položky, protože se diakritika při porovnávání slov skládá. Týká se to i slovníku synonym.
+- **Kurátorovaná položka má vždy přednost.** Když je přijatelná shoda v katalogu i mezi odhady, vybere se katalogová. Odhad tedy nikdy nezastíní ověřenou potravinu.
+
+Když se i tak spustí odhad, znamená to, že v katalogu opravdu není nic použitelného.
+
 ---
 
 ## Databázové schéma (SQLite)

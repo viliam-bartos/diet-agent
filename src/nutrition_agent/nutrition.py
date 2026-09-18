@@ -1,6 +1,8 @@
 """Core nutrition calculation, DIAAS analysis, and fuzzy matching logic."""
 
 import logging
+import re
+import unicodedata
 from enum import StrEnum
 from typing import Literal
 
@@ -19,6 +21,12 @@ from nutrition_agent.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def strip_diacritics(text: str) -> str:
+    """Remove diacritics so 'maslo' and 'máslo' compare as the same word."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
 class ProteinCategory(StrEnum):
@@ -57,6 +65,11 @@ FOOD_SYNONYMS: dict[str, str] = {
     "vejce": "vejce (celé)",
     "olej": "olivový olej",
     "tofu": "tofu bílé",
+}
+
+# Same synonyms keyed without diacritics, so 'ryze' resolves like 'rýže'.
+FOLDED_SYNONYMS: dict[str, str] = {
+    strip_diacritics(key): value for key, value in FOOD_SYNONYMS.items()
 }
 
 # Standard piece and measure weights in grams (vault.md section 2)
@@ -145,59 +158,101 @@ def validate_body_weight(weight_kg: float) -> float:
     return weight_kg
 
 
+def food_tokens(name: str) -> set[str]:
+    """Split a food name into comparable lowercase tokens, ignoring punctuation.
+
+    Tokens are diacritic-folded because people often type Czech names without
+    diacritics, especially on mobile.
+    """
+    folded = strip_diacritics(name.lower())
+    return {token for token in re.split(r"[^\w]+", folded) if token}
+
+
+def is_token_subset(query: str, candidate: str) -> bool:
+    """Report whether every word of the query appears in the candidate name.
+
+    'máslo' is a subset of 'Máslo 82%' and 'cfm syrovátkový protein' is a subset of
+    'Prom-IN CFM Pure Performance (syrovátkový protein)'. Those pairs score below
+    the similarity threshold even though they clearly describe the same food.
+    """
+    query_tokens = food_tokens(query)
+    return bool(query_tokens) and query_tokens <= food_tokens(candidate)
+
+
 def find_matching_food(
     query: str,
     foods: list[FoodDefinition],
 ) -> tuple[FoodDefinition, float]:
-    """Find the best matching food in database using rapidfuzz token_sort_ratio.
+    """Find the best matching food in the catalog.
 
     Rules:
         - Score >= 85: Immediate automatic match.
         - Score 75 - 84: Acceptable match with log warning.
-        - Score < 75: Match rejected, raises FoodNotFoundError (Fail Fast).
+        - All query words contained in the candidate name: accepted, still scored
+          by token_sort_ratio so an uncertain mapping is logged as such.
+        - Otherwise: rejected with FoodNotFoundError (Fail Fast).
 
-    Args:
-        query: Raw or extracted food name.
-        foods: List of food definitions from local foods.json database.
+    A curated catalog entry always wins over an AI-estimated one whenever both are
+    acceptable, so an estimate can never shadow a verified food.
 
     Returns:
         Tuple of (Matched FoodDefinition, score).
 
     Raises:
-        FoodNotFoundError: If best matching score is below 75%.
+        FoodNotFoundError: If no candidate is acceptable.
     """
-    normalized_query = query.strip().lower()
+    normalized_query = " ".join(query.strip().lower().split())
 
-    # Check hard synonyms dictionary first
-    matched_query = FOOD_SYNONYMS.get(normalized_query, normalized_query)
+    # Hard synonyms first, matched with and without diacritics.
+    matched_query = (
+        FOOD_SYNONYMS.get(normalized_query)
+        or FOLDED_SYNONYMS.get(strip_diacritics(normalized_query))
+        or normalized_query
+    )
 
+    acceptable: list[tuple[FoodDefinition, float, bool]] = []
     best_food: FoodDefinition | None = None
     best_score: float = -1.0
 
     for food in foods:
         candidate_name = food.name.strip().lower()
         score = float(fuzz.token_sort_ratio(matched_query, candidate_name))
+
         if score > best_score:
             best_score = score
             best_food = food
 
-    if best_food is None or best_score < MIN_FOOD_MATCH_SCORE:
-        best_name = best_food.name if best_food else None
+        contained = is_token_subset(matched_query, candidate_name)
+        if score >= MIN_FOOD_MATCH_SCORE or contained:
+            acceptable.append((food, score, contained))
+
+    if not acceptable:
         raise FoodNotFoundError(
             food_name=query,
-            best_match=best_name,
+            best_match=best_food.name if best_food else None,
             score=max(0.0, best_score),
         )
 
-    if best_score < 85.0:
+    # A curated entry always beats an estimate, a full word match beats a vague one,
+    # and only then does the similarity score decide.
+    chosen_food, chosen_score, _ = max(
+        acceptable,
+        key=lambda candidate: (
+            candidate[0].source == "curated",
+            candidate[2],
+            candidate[1],
+        ),
+    )
+
+    if chosen_score < 85.0:
         logger.warning(
             "Nejisté mapování potraviny: '%s' -> '%s' (skóre %.1f%%)",
             query,
-            best_food.name,
-            best_score,
+            chosen_food.name,
+            chosen_score,
         )
 
-    return best_food, best_score
+    return chosen_food, chosen_score
 
 
 def convert_to_grams(
