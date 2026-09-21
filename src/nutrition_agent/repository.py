@@ -10,9 +10,13 @@ from nutrition_agent.models import (
     CalculatedWorkoutLog,
     FoodDefinition,
     food_name_key,
+    local_date,
     utc_now_iso,
 )
-from nutrition_agent.targets import DayType, DietGoal
+from nutrition_agent.targets import DayType, DietGoal, calculate_daily_targets
+
+# Day-scoped queries filter with date(logged_at, 'localtime') rather than a prefix
+# match, so a log written at 00:30 local is not filed under the previous UTC date.
 
 
 def load_foods_from_json(file_path: str | Path = "data/foods.json") -> list[FoodDefinition]:
@@ -401,7 +405,7 @@ def get_daily_food_logs(
            state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
            nutrition_source, conversion_estimated
     FROM food_logs
-    WHERE logged_at LIKE ? || '%'
+    WHERE date(logged_at, 'localtime') = ?
     ORDER BY logged_at ASC
     """
     cursor = conn.cursor()
@@ -419,7 +423,7 @@ def get_latest_weight_log(
         sql = """
         SELECT id, logged_at, raw_input, weight_kg
         FROM weight_logs
-        WHERE logged_at LIKE ? || '%'
+        WHERE date(logged_at, 'localtime') = ?
         ORDER BY logged_at DESC
         LIMIT 1
         """
@@ -703,7 +707,7 @@ def get_daily_workout_log(
     sql = """
     SELECT id, logged_at, raw_input, workout_type, duration_minutes, notes
     FROM workout_logs
-    WHERE logged_at LIKE ? || '%'
+    WHERE date(logged_at, 'localtime') = ?
     ORDER BY logged_at DESC
     LIMIT 1
     """
@@ -768,7 +772,7 @@ def get_weight_trend(
 
     day_weights: dict[str, float] = {}
     for log in logs:
-        d = log.logged_at[:10]
+        d = local_date(log.logged_at)
         day_weights[d] = log.weight_kg
 
     sorted_dates = sorted(day_weights.keys())
@@ -798,127 +802,302 @@ def get_weight_trend(
     return results
 
 
-def get_dashboard_kpis(
+def get_weight_trend_for_days(
     conn: sqlite3.Connection,
-    start_iso: str | None = None,
-    end_iso: str | None = None,
+    days: int = 365,
 ) -> dict[str, object]:
-    """Aggregate high-level KPIs for dashboard header cards."""
+    """Return weight points plus headline numbers for the last `days` local days."""
+    from datetime import datetime, timedelta
+
+    end_day = local_date(utc_now_iso())
+    start_day = (datetime.strptime(end_day, "%Y-%m-%d") - timedelta(days=days - 1)).strftime(
+        "%Y-%m-%d"
+    )
+
+    points = get_weight_trend(conn, f"{start_day}T00:00:00", f"{end_day}T23:59:59")
+
+    weights = [float(p["weight_kg"]) for p in points]
+    current = weights[-1] if weights else None
+    first = weights[0] if weights else None
+
+    return {
+        "days": days,
+        "start_date": start_day,
+        "end_date": end_day,
+        "current_weight": current,
+        "start_weight": first,
+        "delta_kg": round(current - first, 1)
+        if current is not None and first is not None
+        else None,
+        "min_weight": min(weights) if weights else None,
+        "max_weight": max(weights) if weights else None,
+        "count": len(weights),
+        "points": points,
+    }
+
+
+def get_food_logs_between_days(
+    conn: sqlite3.Connection,
+    start_day: str,
+    end_day: str,
+) -> list[CalculatedFoodLog]:
+    """Fetch food logs whose local calendar date falls in the inclusive range."""
+    cursor = conn.execute(
+        """
+        SELECT id, logged_at, raw_input, food_name_matched, amount_g,
+               state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+               nutrition_source, conversion_estimated
+        FROM food_logs
+        WHERE date(logged_at, 'localtime') BETWEEN ? AND ?
+        ORDER BY logged_at ASC
+        """,
+        (start_day, end_day),
+    )
+    return [_row_to_food_log(row) for row in cursor.fetchall()]
+
+
+def get_workout_logs_between_days(
+    conn: sqlite3.Connection,
+    start_day: str,
+    end_day: str,
+) -> list[CalculatedWorkoutLog]:
+    """Fetch workout logs whose local calendar date falls in the inclusive range."""
+    cursor = conn.execute(
+        """
+        SELECT id, logged_at, raw_input, workout_type, duration_minutes, notes
+        FROM workout_logs
+        WHERE date(logged_at, 'localtime') BETWEEN ? AND ?
+        ORDER BY logged_at ASC
+        """,
+        (start_day, end_day),
+    )
+    return [
+        CalculatedWorkoutLog(
+            id=row["id"],
+            logged_at=row["logged_at"],
+            raw_input=row["raw_input"],
+            workout_type=row["workout_type"],
+            duration_minutes=row["duration_minutes"],
+            notes=row["notes"],
+        )
+        for row in cursor.fetchall()
+    ]
+
+
+def get_day_summaries(
+    conn: sqlite3.Connection,
+    start_day: str,
+    end_day: str,
+) -> list[dict[str, object]]:
+    """Build per-day totals and targets for every local day in the inclusive range.
+
+    Each day is measured against its own target: a day with a logged workout uses the
+    training target, other days use the rest target.
+    """
     from collections import defaultdict
+    from datetime import datetime, timedelta
 
-    weight_stats = get_weight_delta(conn, start_iso, end_iso)
-    food_logs = get_food_logs_in_range(conn, start_iso, end_iso)
-    workout_logs = get_workout_logs_in_range(conn, start_iso, end_iso)
+    goal, _, weight = get_user_profile(conn)
 
-    daily_cals: dict[str, float] = defaultdict(float)
-    daily_prots: dict[str, float] = defaultdict(float)
+    food_logs = get_food_logs_between_days(conn, start_day, end_day)
+    workout_logs = get_workout_logs_between_days(conn, start_day, end_day)
+
+    daily_calories: dict[str, float] = defaultdict(float)
+    daily_protein: dict[str, float] = defaultdict(float)
     daily_carbs: dict[str, float] = defaultdict(float)
     daily_fats: dict[str, float] = defaultdict(float)
 
-    for f in food_logs:
-        d = f.logged_at[:10]
-        daily_cals[d] += f.calories
-        daily_prots[d] += f.protein_usable
-        daily_carbs[d] += f.carbs
-        daily_fats[d] += f.fats
+    for food in food_logs:
+        day = local_date(food.logged_at)
+        daily_calories[day] += food.calories
+        daily_protein[day] += food.protein_usable
+        daily_carbs[day] += food.carbs
+        daily_fats[day] += food.fats
 
-    days_logged = len(daily_cals)
-    total_cals = sum(daily_cals.values())
-    total_prots = sum(daily_prots.values())
-    total_carbs = sum(daily_carbs.values())
-    total_fats = sum(daily_fats.values())
+    daily_workout: dict[str, CalculatedWorkoutLog] = {}
+    for workout in workout_logs:
+        daily_workout[local_date(workout.logged_at)] = workout
 
-    avg_cals = (total_cals / days_logged) if days_logged > 0 else 0.0
-    avg_prots = (total_prots / days_logged) if days_logged > 0 else 0.0
-    avg_carbs = (total_carbs / days_logged) if days_logged > 0 else 0.0
-    avg_fats = (total_fats / days_logged) if days_logged > 0 else 0.0
+    today = local_date(utc_now_iso())
+    _, configured_day_type, _ = get_user_profile(conn)
+    summaries: list[dict[str, object]] = []
 
-    workout_days = {w.logged_at[:10] for w in workout_logs}
+    current = datetime.strptime(start_day, "%Y-%m-%d")
+    last = datetime.strptime(end_day, "%Y-%m-%d")
+    while current <= last:
+        day = current.strftime("%Y-%m-%d")
+        workout = daily_workout.get(day)
 
-    return {
-        "current_weight": weight_stats["current_weight"],
-        "weight_delta": weight_stats["delta_kg"],
-        "avg_calories": round(avg_cals, 0),
-        "avg_protein_diaas": round(avg_prots, 1),
-        "avg_carbs": round(avg_carbs, 1),
-        "avg_fats": round(avg_fats, 1),
-        "total_workout_days": len(workout_days),
-        "total_food_days": days_logged,
-    }
+        # Today follows the configured setting because a workout may still be ahead.
+        # Past days are inferred from whether a workout was actually logged, so a rest
+        # day is not judged against the higher training target.
+        if day >= today:
+            day_type = configured_day_type
+        else:
+            day_type = DayType.TRAINING if workout else DayType.REST
+
+        targets = calculate_daily_targets(weight, goal, day_type)
+        calories = daily_calories.get(day, 0.0)
+
+        summaries.append(
+            {
+                "date": day,
+                "weekday": current.weekday(),
+                "calories": round(calories, 1),
+                "protein_usable": round(daily_protein.get(day, 0.0), 1),
+                "carbs": round(daily_carbs.get(day, 0.0), 1),
+                "fats": round(daily_fats.get(day, 0.0), 1),
+                "target_calories": targets.calories,
+                "target_protein": targets.protein_usable,
+                "target_carbs": targets.carbs,
+                "target_fats": targets.fats,
+                "day_type": day_type.value,
+                "has_workout": workout is not None,
+                "workout_type": workout.workout_type if workout else None,
+                "has_food": calories > 0.0,
+            }
+        )
+        current += timedelta(days=1)
+
+    return summaries
+
+
+def classify_adherence(summary: dict[str, object]) -> str:
+    """Grade one day: protein target met, both targets met, or under target."""
+    if not summary["has_food"]:
+        return "empty"
+
+    protein_ok = summary["protein_usable"] >= (summary["target_protein"] * 0.90)
+    calories = summary["calories"]
+    calories_ok = summary["target_calories"] * 0.85 <= calories <= summary["target_calories"] * 1.15
+
+    if protein_ok and calories_ok:
+        return "green"
+    if protein_ok:
+        return "blue"
+    return "amber"
 
 
 def get_heatmap_data(
     conn: sqlite3.Connection,
     start_iso: str | None = None,
     end_iso: str | None = None,
-    target_calories: float = 3150.0,
-    target_protein: float = 155.0,
+    target_calories: float | None = None,
+    target_protein: float | None = None,
 ) -> list[dict[str, object]]:
-    """Compute day-by-day matrix for GitHub-style adherence calendar heatmap."""
-    from collections import defaultdict
+    """Build the day-by-day adherence calendar.
+
+    Each day is graded against its own target, so a rest day is not marked as
+    under-eating just because the training target is higher.
+    """
     from datetime import datetime, timedelta
 
-    food_logs = get_food_logs_in_range(conn, start_iso, end_iso)
-    workout_logs = get_workout_logs_in_range(conn, start_iso, end_iso)
-
-    daily_cals: dict[str, float] = defaultdict(float)
-    daily_prots: dict[str, float] = defaultdict(float)
-    for f in food_logs:
-        d = f.logged_at[:10]
-        daily_cals[d] += f.calories
-        daily_prots[d] += f.protein_usable
-
-    daily_workouts: dict[str, str] = {}
-    for w in workout_logs:
-        d = w.logged_at[:10]
-        daily_workouts[d] = w.workout_type
+    today = local_date(utc_now_iso())
 
     if start_iso and end_iso:
-        dt_start = datetime.strptime(start_iso[:10], "%Y-%m-%d")
-        dt_end = datetime.strptime(end_iso[:10], "%Y-%m-%d")
+        start_day = start_iso[:10]
+        end_day = end_iso[:10]
     else:
-        all_dates = list(daily_cals.keys()) + list(daily_workouts.keys())
-        if all_dates:
-            dt_start = datetime.strptime(min(all_dates), "%Y-%m-%d")
-            dt_end = datetime.strptime(max(all_dates), "%Y-%m-%d")
-        else:
-            dt_end = datetime.now()
-            dt_start = dt_end - timedelta(days=29)
+        end_day = today
+        start_day = (datetime.strptime(end_day, "%Y-%m-%d") - timedelta(days=364)).strftime(
+            "%Y-%m-%d"
+        )
 
     heatmap: list[dict[str, object]] = []
-    curr = dt_start
-    while curr <= dt_end:
-        d_str = curr.strftime("%Y-%m-%d")
-        cal = daily_cals.get(d_str, 0.0)
-        prot = daily_prots.get(d_str, 0.0)
-        has_workout = d_str in daily_workouts
-        workout_type = daily_workouts.get(d_str)
-
-        if cal == 0.0 and prot == 0.0:
-            level = "empty"
-        elif prot >= (target_protein * 0.90) and (
-            target_calories * 0.85 <= cal <= target_calories * 1.15
-        ):
-            level = "green"
-        elif prot >= (target_protein * 0.90):
-            level = "blue"
-        else:
-            level = "amber"
-
-        heatmap.append(
-            {
-                "date": d_str,
-                "weekday": curr.weekday(),
-                "calories": round(cal, 1),
-                "protein_usable": round(prot, 1),
-                "has_workout": has_workout,
-                "workout_type": workout_type,
-                "level": level,
-            }
-        )
-        curr += timedelta(days=1)
+    for summary in get_day_summaries(conn, start_day, end_day):
+        heatmap.append({**summary, "level": classify_adherence(summary)})
 
     return heatmap
+
+
+def get_heatmap_for_days(
+    conn: sqlite3.Connection,
+    days: int = 365,
+) -> list[dict[str, object]]:
+    """Return the adherence calendar covering the last `days` local days."""
+    from datetime import datetime, timedelta
+
+    end_day = local_date(utc_now_iso())
+    start_day = (datetime.strptime(end_day, "%Y-%m-%d") - timedelta(days=days - 1)).strftime(
+        "%Y-%m-%d"
+    )
+    return get_heatmap_data(conn, f"{start_day}T00:00:00", f"{end_day}T23:59:59")
+
+
+def get_week_summary(
+    conn: sqlite3.Connection,
+    end_day: str,
+    days: int = 7,
+) -> dict[str, object]:
+    """Summarise the last `days` local days and the running energy balance.
+
+    The balance is the sum of (intake - that day's target) over days with food
+    logged. A positive number means a surplus, negative a deficit.
+    """
+    from datetime import datetime, timedelta
+
+    start_day = (datetime.strptime(end_day, "%Y-%m-%d") - timedelta(days=days - 1)).strftime(
+        "%Y-%m-%d"
+    )
+    summaries = get_day_summaries(conn, start_day, end_day)
+    logged_days = [day for day in summaries if day["has_food"]]
+
+    total_calories = sum(day["calories"] for day in logged_days)
+    total_target = sum(day["target_calories"] for day in logged_days)
+    total_protein = sum(day["protein_usable"] for day in logged_days)
+    total_target_protein = sum(day["target_protein"] for day in logged_days)
+
+    balance = total_calories - total_target
+    return {
+        "start_date": start_day,
+        "end_date": end_day,
+        "logged_days": len(logged_days),
+        "total_calories": round(total_calories, 0),
+        "total_target_calories": round(total_target, 0),
+        "calorie_balance": round(balance, 0),
+        "avg_calories": round(total_calories / len(logged_days), 0) if logged_days else 0.0,
+        "avg_target_calories": (round(total_target / len(logged_days), 0) if logged_days else 0.0),
+        "total_protein": round(total_protein, 1),
+        "total_target_protein": round(total_target_protein, 1),
+        "protein_balance": round(total_protein - total_target_protein, 1),
+        "workout_days": sum(1 for day in summaries if day["has_workout"]),
+        "days": summaries,
+    }
+
+
+def get_day_detail(
+    conn: sqlite3.Connection,
+    day: str,
+) -> dict[str, object]:
+    """Return one day's consumption, targets and records, for the dashboard."""
+    summary = get_day_summaries(conn, day, day)[0]
+
+    food_logs = get_daily_food_logs(conn, day)
+    weight = get_daily_weight_log(conn, day)
+
+    return {
+        **summary,
+        "remaining_calories": round(summary["target_calories"] - summary["calories"], 0),
+        "remaining_protein": round(summary["target_protein"] - summary["protein_usable"], 1),
+        "remaining_carbs": round(summary["target_carbs"] - summary["carbs"], 1),
+        "remaining_fats": round(summary["target_fats"] - summary["fats"], 1),
+        "weight_kg": weight.weight_kg if weight else None,
+        "items": [
+            {
+                "id": food.id,
+                "logged_at": food.logged_at,
+                "name": food.food_name_matched,
+                "amount_g": food.amount_g,
+                "state": food.state,
+                "calories": food.calories,
+                "protein_usable": food.protein_usable,
+                "carbs": food.carbs,
+                "fats": food.fats,
+                "nutrition_source": food.nutrition_source,
+            }
+            for food in food_logs
+        ],
+    }
 
 
 def get_unified_records(
@@ -1037,7 +1216,7 @@ def count_day_logs(conn: sqlite3.Connection, date_prefix: str) -> dict[str, int]
     counts: dict[str, int] = {}
     for key, table in DAY_LOG_TABLES.items():
         cursor.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE logged_at LIKE ? || '%'",
+            f"SELECT COUNT(*) FROM {table} WHERE date(logged_at, 'localtime') = ?",
             (date_prefix,),
         )
         counts[key] = int(cursor.fetchone()[0])
@@ -1053,7 +1232,7 @@ def delete_day_logs(conn: sqlite3.Connection, date_prefix: str) -> dict[str, int
     deleted: dict[str, int] = {}
     for key, table in DAY_LOG_TABLES.items():
         cursor.execute(
-            f"DELETE FROM {table} WHERE logged_at LIKE ? || '%'",
+            f"DELETE FROM {table} WHERE date(logged_at, 'localtime') = ?",
             (date_prefix,),
         )
         deleted[key] = int(cursor.rowcount)

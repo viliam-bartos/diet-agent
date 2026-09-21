@@ -114,16 +114,11 @@ def test_dashboard_html_served(api_client: TestClient):
 
     # Required dashboard components
     assert "chart.js" in body.lower()
-    assert "timeframe-btn" in body
     assert "kpiWeight" in body
     assert "heatmapGrid" in body
     assert "recordsBody" in body
-    assert "7 dní" in body
-    assert "30 dní" in body
-    assert "3 měsíce" in body
-    assert "6 měsíců" in body
-    assert "1 rok" in body
-    assert "Vše" in body
+    assert "weekBalance" in body
+    assert "dayPanel" in body
 
     # Row actions for editing and deleting records
     assert "Akce" in body
@@ -152,21 +147,22 @@ def test_dashboard_reports_its_version_and_disables_caching(api_client: TestClie
     assert api_client.get("/api/version").json() == {"version": __version__}
 
 
-def test_kpis_payload_carries_version_and_every_card_field(api_client: TestClient):
-    """The KPI response must satisfy every field the cards read."""
+def test_day_payload_carries_version_and_every_card_field(api_client: TestClient):
+    """The day response must satisfy every field the cards read."""
     from nutrition_agent import __version__
 
-    data = api_client.get("/api/kpis", params={"period": "30d"}).json()
+    data = api_client.get("/api/day").json()
 
     required = (
-        "avg_calories",
+        "calories",
         "target_calories",
-        "avg_protein_diaas",
+        "protein_usable",
         "target_protein",
-        "avg_carbs",
+        "carbs",
         "target_carbs",
-        "avg_fats",
+        "fats",
         "target_fats",
+        "day_type",
         "version",
     )
     for field in required:
@@ -205,44 +201,68 @@ def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):
     assert 'class="brand-subtitle"' not in body
 
 
-def test_api_kpis_endpoint(api_client: TestClient):
-    """KPI endpoint returns weights, averages and configured targets."""
-    response = api_client.get("/api/kpis", params={"period": "30d"})
+def test_api_day_endpoint_returns_today(api_client: TestClient):
+    """The day endpoint reports today's consumption against today's target."""
+    from nutrition_agent import __version__
+
+    response = api_client.get("/api/day")
     assert response.status_code == 200
     data = response.json()
 
-    assert data["current_weight"] == 83.0
-    assert data["weight_delta"] == -0.8
-    assert data["avg_calories"] == 212.0
-    assert data["avg_protein_diaas"] == 46.0
-    assert data["avg_carbs"] == 0.0
-    assert data["avg_fats"] == 2.4
-    assert data["total_workout_days"] == 1
-    assert data["total_food_days"] == 5
+    today = datetime.now().strftime("%Y-%m-%d")
+    assert data["date"] == today
+    assert data["calories"] == 212.0
+    assert data["protein_usable"] == 46.0
+    assert data["fats"] == 2.4
     assert data["target_calories"] == 3150.0
-    assert data["target_protein"] == 155.0
     assert data["target_carbs"] == 430.0
     assert data["target_fats"] == 82.5
     assert data["goal"] == "lean_bulk"
-    assert data["day_type"] == "training"
+    assert data["remaining_calories"] == 3150.0 - 212.0
+    assert data["version"] == __version__
+    assert len(data["items"]) == 1
 
 
-def test_api_kpis_averages_macros_per_logged_day(api_client: TestClient):
-    """Carb and fat averages are per logged day, like calories and protein."""
-    data = api_client.get("/api/kpis", params={"period": "30d"}).json()
+def test_api_day_endpoint_accepts_a_date(api_client: TestClient):
+    """Passing a date returns that day, empty when nothing was logged."""
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    data = api_client.get("/api/day", params={"date": yesterday}).json()
 
-    # The fixture logs one identical meal on each of five days
-    assert data["avg_carbs"] == 0.0
-    assert data["avg_fats"] == 2.4
-    assert data["total_food_days"] == 5
+    assert data["date"] == yesterday
+    assert data["calories"] == 212.0  # the fixture logs one meal per day for five days
+
+    empty = api_client.get("/api/day", params={"date": "1990-01-01"}).json()
+    assert empty["calories"] == 0.0
+    assert empty["items"] == []
+
+
+def test_api_day_endpoint_rejects_a_bad_date(api_client: TestClient):
+    """An unsupported date format is reported, not silently ignored."""
+    response = api_client.get("/api/day", params={"date": "21.9.2026"})
+    assert response.status_code == 422
+
+
+def test_api_week_endpoint_reports_the_balance(api_client: TestClient):
+    """The week endpoint returns a 7-day window with a signed balance."""
+    data = api_client.get("/api/week").json()
+
+    assert len(data["days"]) == 7
+    assert data["logged_days"] == 5
+    assert data["workout_days"] == 1
+    assert data["total_calories"] == 212.0 * 5
+    assert data["calorie_balance"] == round(
+        data["total_calories"] - data["total_target_calories"], 0
+    )
+    # 212 kcal a day is far below any target
+    assert data["calorie_balance"] < 0
 
 
 def test_dashboard_kpi_cards_show_macros_with_targets(api_client: TestClient):
     """The header cards are the four macros, each with a goal line."""
     body = api_client.get("/").text
 
-    for label in ("Kalorie / den", "Bílkoviny / den", "Sacharidy / den", "Tuky / den"):
-        assert label in body
+    for label in ("Kalorie", "Bílkoviny", "Sacharidy", "Tuky"):
+        assert f'<div class="kpi-label">{label}</div>' in body
 
     for element in (
         "kpiCals",
@@ -267,21 +287,62 @@ def test_dashboard_kpi_cards_show_macros_with_targets(api_client: TestClient):
     assert 'id="kpiWeightDelta"' in body
 
 
-def test_api_weight_trend_endpoint(api_client: TestClient):
-    """Weight trend endpoint returns points with a 7-day moving average."""
-    response = api_client.get("/api/weight-trend", params={"period": "30d"})
-    assert response.status_code == 200
-    points = response.json()
+def test_dashboard_has_weekly_balance_and_day_panel(api_client: TestClient):
+    """The weekly indicator and the click-through day panel are present."""
+    body = api_client.get("/").text
 
+    assert 'id="weekBalance"' in body
+    assert 'id="weekDays"' in body
+    assert 'id="weekStats"' in body
+    assert 'id="dayPanel"' in body
+    assert 'id="dayPanelItems"' in body
+    assert "selectDay" in body
+    assert "loadWeek" in body
+
+
+def test_dashboard_dropped_the_timeframe_switcher(api_client: TestClient):
+    """The period toggles are gone; the chart and calendar are fixed to a year."""
+    body = api_client.get("/").text
+
+    assert "timeframe-bar" not in body
+    assert "timeframe-btn" not in body
+    assert "setTimeframe" not in body
+    assert "currentTimeframe" not in body
+
+    # Both long views are requested with a fixed one-year window
+    assert "YEAR_DAYS = 365" in body
+    assert "/api/weight-trend?days=" in body
+    assert "/api/heatmap?days=" in body
+
+
+def test_api_weight_trend_endpoint(api_client: TestClient):
+    """Weight trend endpoint returns points plus headline numbers."""
+    response = api_client.get("/api/weight-trend", params={"days": 30})
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["days"] == 30
+    assert data["count"] == 5
+    assert data["current_weight"] == 83.0
+    assert data["start_weight"] == 83.8
+    assert data["delta_kg"] == -0.8
+
+    points = data["points"]
     assert len(points) == 5
     for point in points:
         assert set(point.keys()) == {"date", "weight_kg", "moving_avg_7d"}
     assert all(p["date"] <= points[-1]["date"] for p in points)
 
 
+def test_api_weight_trend_defaults_to_a_year(api_client: TestClient):
+    """Without a window the chart asks for 365 days."""
+    data = api_client.get("/api/weight-trend").json()
+    assert data["days"] == 365
+
+
 def test_api_heatmap_endpoint(api_client: TestClient):
     """Heatmap endpoint returns one cell per day with adherence levels."""
-    response = api_client.get("/api/heatmap", params={"period": "7d"})
+    response = api_client.get("/api/heatmap", params={"days": 7})
     assert response.status_code == 200
     cells = response.json()
 
@@ -292,6 +353,13 @@ def test_api_heatmap_endpoint(api_client: TestClient):
     today_key = datetime.now().strftime("%Y-%m-%d")
     today_cell = next(c for c in cells if c["date"] == today_key)
     assert today_cell["has_workout"] is True
+
+
+def test_api_heatmap_defaults_to_a_year(api_client: TestClient):
+    """The calendar covers a full year by default."""
+    cells = api_client.get("/api/heatmap").json()
+    assert len(cells) == 365
+    assert cells[-1]["date"] == datetime.now().strftime("%Y-%m-%d")
 
 
 def test_api_records_filtering_and_pagination(api_client: TestClient):
@@ -342,37 +410,24 @@ def test_api_message_requires_payload_field(api_client: TestClient):
     assert api_client.post("/api/message", json={}).status_code == 422
 
 
-def test_resolve_period_dates_windows():
-    """Period shorthands map onto expected rolling windows."""
-    start_all, end_all = web_module._resolve_period_dates("all")
-    assert start_all is None and end_all is None
+def test_api_message_accepts_a_target_date(api_client: TestClient, temp_db_path: Path):
+    """The message endpoint can backdate a record to a chosen day."""
+    target = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
 
-    start_7, end_7 = web_module._resolve_period_dates("7d")
-    assert end_7 is not None and start_7 is not None
-    span_7 = datetime.strptime(end_7[:10], "%Y-%m-%d") - datetime.strptime(start_7[:10], "%Y-%m-%d")
-    assert span_7.days == 6
-
-    start_365, end_365 = web_module._resolve_period_dates("365d")
-    span_365 = datetime.strptime(end_365[:10], "%Y-%m-%d") - datetime.strptime(
-        start_365[:10], "%Y-%m-%d"
+    response = api_client.post(
+        "/api/message",
+        json={"message": "dnes", "date": target},
     )
-    assert span_365.days == 364
+    assert response.status_code == 200
+    assert response.json()["date"] == target
 
-    # Unknown period falls back to the 30-day default
-    start_unknown, end_unknown = web_module._resolve_period_dates("nesmysl")
-    span_unknown = datetime.strptime(end_unknown[:10], "%Y-%m-%d") - datetime.strptime(
-        start_unknown[:10], "%Y-%m-%d"
-    )
-    assert span_unknown.days == 29
+    # An empty date means "today", which the endpoint reports as null
+    plain = api_client.post("/api/message", json={"message": "dnes"})
+    assert plain.json()["date"] is None
 
-
-def test_api_kpis_applies_time_window(api_client: TestClient):
-    """A narrow window excludes older records from the aggregation."""
-    narrow = api_client.get("/api/kpis", params={"period": "1d"}).json()
-    wide = api_client.get("/api/kpis", params={"period": "30d"}).json()
-
-    assert wide["total_food_days"] == 5
-    assert narrow["total_food_days"] <= wide["total_food_days"]
+    # A malformed date is rejected before anything is written
+    bad = api_client.post("/api/message", json={"message": "dnes", "date": "3.9.2026"})
+    assert bad.status_code == 422
 
 
 def test_create_app_upgrades_legacy_schema(temp_db_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -427,7 +482,7 @@ def test_create_app_upgrades_legacy_schema(temp_db_path: Path, monkeypatch: pyte
     monkeypatch.setattr(web_module, "settings", settings_override)
 
     client = TestClient(web_module.create_app())
-    assert client.get("/api/kpis", params={"period": "all"}).status_code == 200
+    assert client.get("/api/day").status_code == 200
 
     conn = get_connection(temp_db_path)
     try:
@@ -444,7 +499,7 @@ def test_create_app_upgrades_legacy_schema(temp_db_path: Path, monkeypatch: pyte
 def test_create_app_uses_derived_targets_when_env_unset(
     api_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ):
-    """Without env targets the KPI endpoint falls back to weight-derived targets."""
+    """Without env targets the day endpoint falls back to weight-derived targets."""
     settings_override = type(web_module.settings)(
         database_path=web_module.settings.database_path,
         foods_data_path=web_module.settings.foods_data_path,
@@ -459,7 +514,7 @@ def test_create_app_uses_derived_targets_when_env_unset(
     monkeypatch.setattr(web_module, "settings", settings_override)
 
     client = TestClient(web_module.create_app())
-    data = client.get("/api/kpis", params={"period": "30d"}).json()
+    data = client.get("/api/day").json()
 
     # Latest seeded weight is 83.0 kg -> lean bulk training day targets
     assert data["target_calories"] == 3150.0

@@ -11,11 +11,14 @@ from nutrition_agent.db import SCHEMA_SQL, get_connection
 from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog, CalculatedWorkoutLog
 from nutrition_agent.repository import (
     get_daily_weight_comparison,
-    get_dashboard_kpis,
+    get_day_detail,
+    get_day_summaries,
     get_heatmap_data,
     get_unified_records,
+    get_week_summary,
     get_weight_delta,
     get_weight_trend,
+    get_weight_trend_for_days,
     get_workout_logs_in_range,
     save_food_logs,
     save_weight_log,
@@ -171,52 +174,151 @@ def test_weight_trend_empty(seeded_db: sqlite3.Connection):
     assert get_weight_trend(seeded_db, "2000-01-01T00:00:00", "2000-01-02T00:00:00") == []
 
 
-def test_dashboard_kpis_aggregation(seeded_db: sqlite3.Connection):
-    """Verify KPI aggregation over a time window."""
-    kpis = get_dashboard_kpis(seeded_db, "2026-09-08T00:00:00", "2026-09-17T23:59:59")
+def test_day_summaries_and_week_balance(seeded_db: sqlite3.Connection):
+    """Per-day summaries feed the weekly balance."""
+    summaries = get_day_summaries(seeded_db, "2026-09-08", "2026-09-17")
 
-    assert kpis["current_weight"] == 83.9
-    assert kpis["weight_delta"] == 0.9
-    assert kpis["avg_calories"] == 2000.0
-    assert kpis["avg_protein_diaas"] == 140.0
-    assert kpis["total_food_days"] == 10
-    # Workouts on offsets 0, 3, 6, 9 -> four distinct days
-    assert kpis["total_workout_days"] == 4
+    assert len(summaries) == 10
+    assert all(day["calories"] == 2000.0 for day in summaries)
+    assert all(day["protein_usable"] == 140.0 for day in summaries)
+
+    week = get_week_summary(seeded_db, "2026-09-17", days=7)
+    assert week["start_date"] == "2026-09-11"
+    assert week["end_date"] == "2026-09-17"
+    assert week["logged_days"] == 7
+    assert week["total_calories"] == 14000.0
+    # Workouts fall on 09-08, 09-11, 09-14 and 09-17, so three land in this window
+    assert week["workout_days"] == 3
+    assert week["calorie_balance"] == round(14000.0 - week["total_target_calories"], 0)
+    # 2000 kcal a day against ~2700-3200 kcal targets is a deficit
+    assert week["calorie_balance"] < 0
+    assert week["protein_balance"] < 0
 
 
-def test_dashboard_kpis_empty_database():
-    """KPIs on an empty database must be zero/None without raising."""
+def test_week_summary_on_empty_database():
+    """An empty database yields zeroed week figures instead of an error."""
     conn = get_connection(":memory:")
     conn.executescript(SCHEMA_SQL)
 
-    kpis = get_dashboard_kpis(conn)
-    assert kpis["current_weight"] is None
-    assert kpis["weight_delta"] is None
-    assert kpis["avg_calories"] == 0.0
-    assert kpis["avg_protein_diaas"] == 0.0
-    assert kpis["total_workout_days"] == 0
+    week = get_week_summary(conn, "2026-09-17", days=7)
+    assert week["logged_days"] == 0
+    assert week["total_calories"] == 0.0
+    assert week["calorie_balance"] == 0.0
+    assert week["avg_calories"] == 0.0
+    assert len(week["days"]) == 7
+
+
+def test_day_detail_includes_totals_targets_and_items(seeded_db: sqlite3.Connection):
+    """A single day reports consumption, its target, and the logged items."""
+    detail = get_day_detail(seeded_db, "2026-09-08")
+
+    assert detail["date"] == "2026-09-08"
+    assert detail["calories"] == 2000.0
+    assert detail["protein_usable"] == 140.0
+    assert detail["has_workout"] is True
+    assert detail["day_type"] == "training"
+    assert detail["remaining_calories"] == round(detail["target_calories"] - 2000.0, 0)
+    assert len(detail["items"]) == 1
+    assert detail["items"][0]["name"] == "Kuřecí prsa"
+    assert detail["weight_kg"] == 83.0
+
+
+def test_day_detail_on_day_without_records(seeded_db: sqlite3.Connection):
+    """A day with nothing logged reports zeroes and no items."""
+    detail = get_day_detail(seeded_db, "2030-01-01")
+
+    assert detail["calories"] == 0.0
+    assert detail["items"] == []
+    assert detail["has_food"] is False
+    assert detail["weight_kg"] is None
+
+
+def test_weight_trend_for_days_returns_headline_numbers(seeded_db: sqlite3.Connection):
+    """The chart endpoint returns points plus the numbers shown next to it."""
+    data = get_weight_trend_for_days(seeded_db, days=30)
+
+    assert data["count"] == 10
+    assert data["points"]
+    # The seeded window ends today, so old logs fall outside it unless recent
+    assert "start_date" in data and "end_date" in data
+
+
+def test_weight_trend_for_days_covers_a_full_year():
+    """The default year-long window starts 364 days before today."""
+    from datetime import datetime, timedelta
+
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+    save_weight_log(
+        conn,
+        CalculatedWeightLog(
+            logged_at=datetime.now().astimezone().isoformat(),
+            raw_input="83 kg",
+            weight_kg=83.0,
+        ),
+    )
+
+    data = get_weight_trend_for_days(conn, days=365)
+    assert data["days"] == 365
+    assert data["end_date"] == datetime.now().strftime("%Y-%m-%d")
+    assert data["start_date"] == (datetime.now() - timedelta(days=364)).strftime("%Y-%m-%d")
+    assert data["current_weight"] == 83.0
+    assert data["delta_kg"] == 0.0
 
 
 def test_heatmap_levels_and_workout_markers(seeded_db: sqlite3.Connection):
-    """Verify heatmap adherence levels, workout markers and day coverage."""
-    cells = get_heatmap_data(
-        seeded_db,
-        "2026-09-08T00:00:00",
-        "2026-09-17T23:59:59",
-        target_calories=2000.0,
-        target_protein=140.0,
-    )
+    """Verify heatmap adherence levels, workout markers and day coverage.
+
+    Each day is graded against its own target: the seeded rest days use the rest
+    target and the training days use the training target, so the same intake can
+    land in different levels.
+    """
+    cells = get_heatmap_data(seeded_db, "2026-09-08T00:00:00", "2026-09-17T23:59:59")
 
     assert len(cells) == 10
     assert [c["date"] for c in cells] == sorted(c["date"] for c in cells)
 
-    # 2000 kcal and 140 g DIAAS hit both targets exactly -> green
-    assert all(c["level"] == "green" for c in cells)
     assert cells[0]["has_workout"] is True
     assert cells[1]["has_workout"] is False
     assert cells[0]["workout_type"] == "Silový trénink"
     assert cells[0]["calories"] == 2000.0
     assert cells[0]["protein_usable"] == 140.0
+
+    # 2026-09-08 has a workout, so it is judged against the current training target
+    from nutrition_agent.targets import DayType, DietGoal, calculate_daily_targets
+
+    latest_weight = 83.9  # newest weight log in the seeded fixture
+    training = calculate_daily_targets(latest_weight, DietGoal.LEAN_BULK, DayType.TRAINING)
+    rest = calculate_daily_targets(latest_weight, DietGoal.LEAN_BULK, DayType.REST)
+
+    assert cells[0]["day_type"] == "training"
+    assert cells[0]["target_calories"] == training.calories
+    # 2026-09-09 has no workout, so it uses the rest target
+    assert cells[1]["day_type"] == "rest"
+    assert cells[1]["target_calories"] == rest.calories
+    assert rest.calories < training.calories
+
+    # 2000 kcal and 140 g DIAAS is under both targets. Protein only clears the rest
+    # target, so training days grade amber while rest days grade blue.
+    for cell in cells:
+        if cell["has_workout"]:
+            assert cell["level"] == "amber", cell["date"]
+        else:
+            assert cell["level"] == "blue", cell["date"]
+
+
+def test_heatmap_uses_per_day_targets(seeded_db: sqlite3.Connection):
+    """A rest day is not punished for missing the higher training target."""
+    cells = get_heatmap_data(seeded_db, "2026-09-08T00:00:00", "2026-09-17T23:59:59")
+    by_date = {c["date"]: c for c in cells}
+
+    training_day = by_date["2026-09-08"]
+    rest_day = by_date["2026-09-09"]
+
+    assert training_day["has_workout"] is True
+    assert rest_day["has_workout"] is False
+    assert rest_day["target_calories"] < training_day["target_calories"]
+    assert rest_day["target_protein"] < training_day["target_protein"]
 
 
 def test_heatmap_level_classification():
@@ -257,12 +359,17 @@ def test_heatmap_level_classification():
     assert levels["2026-09-03"] == "empty"
 
 
-def test_heatmap_without_explicit_range_uses_data_bounds(seeded_db: sqlite3.Connection):
-    """Without a range the heatmap spans the available data."""
+def test_heatmap_without_explicit_range_spans_a_full_year(seeded_db: sqlite3.Connection):
+    """Without a range the calendar covers the last 365 days ending today."""
+    from datetime import datetime, timedelta
+
     cells = get_heatmap_data(seeded_db)
-    assert len(cells) == 10
-    assert cells[0]["date"] == "2026-09-08"
-    assert cells[-1]["date"] == "2026-09-17"
+
+    assert len(cells) == 365
+    today = datetime.now().strftime("%Y-%m-%d")
+    expected_start = (datetime.now() - timedelta(days=364)).strftime("%Y-%m-%d")
+    assert cells[0]["date"] == expected_start
+    assert cells[-1]["date"] == today
 
 
 def test_unified_records_pagination_and_filtering(seeded_db: sqlite3.Connection):

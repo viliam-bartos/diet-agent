@@ -104,3 +104,88 @@ def test_google_genai_schema_compatibility():
 
     schema = t_schema(None, UserLog)
     assert isinstance(schema, Schema)
+
+
+def test_local_date_converts_utc_to_the_local_day():
+    """A timestamp just after local midnight must not fall on the previous day.
+
+    Timestamps are stored in UTC. Without conversion, a meal eaten at 00:30 local
+    time in a UTC+2 zone would be filed under the previous date.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from nutrition_agent.models import local_date
+
+    offset = datetime.now().astimezone().utcoffset() or timedelta(0)
+    local_midnight = datetime(2026, 9, 18, 0, 30, tzinfo=datetime.now().astimezone().tzinfo)
+    stored = local_midnight.astimezone(UTC).isoformat()
+
+    assert local_date(stored) == "2026-09-18"
+    # Sanity: the raw UTC prefix would differ whenever the offset is positive
+    if offset.total_seconds() > 0:
+        assert stored[:10] == "2026-09-17"
+
+
+def test_local_date_handles_naive_and_malformed_input():
+    """Naive timestamps are treated as UTC and junk falls back to the raw prefix."""
+    from nutrition_agent.models import local_date
+
+    assert local_date("2026-09-18T12:00:00") == "2026-09-18"
+    assert local_date("nesmysl") == "nesmysl"
+
+
+def test_local_timestamp_on_lands_on_the_requested_local_day():
+    """Backdated records keep a plausible clock time but the chosen date."""
+    from datetime import datetime
+
+    from nutrition_agent.models import local_date, local_timestamp_on
+
+    stamp = local_timestamp_on("2026-08-01")
+    assert local_date(stamp) == "2026-08-01"
+
+    # The stored value is UTC, so the local wall-clock time only matches after
+    # converting back. That is the whole point of the helper.
+    reference = datetime(2026, 8, 1, 14, 25, 30)
+    explicit = local_timestamp_on("2026-08-01", moment=reference)
+    assert local_date(explicit) == "2026-08-01"
+
+    back_to_local = datetime.fromisoformat(explicit).astimezone()
+    assert (back_to_local.hour, back_to_local.minute) == (14, 25)
+
+
+def test_day_scoped_queries_use_the_local_day():
+    """A late-night log is found on its local day, not the previous UTC date."""
+    from datetime import UTC, datetime
+
+    from nutrition_agent.db import SCHEMA_SQL, get_connection
+    from nutrition_agent.models import CalculatedFoodLog, local_date
+    from nutrition_agent.repository import get_daily_food_logs, save_food_logs
+
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    tz = datetime.now().astimezone().tzinfo
+    late_night = datetime(2026, 9, 18, 0, 30, tzinfo=tz)
+    stored = late_night.astimezone(UTC).isoformat()
+
+    save_food_logs(
+        conn,
+        [
+            CalculatedFoodLog(
+                logged_at=stored,
+                raw_input="půlnoční svačina",
+                food_name_matched="Kuřecí prsa",
+                amount_g=100.0,
+                state="raw",
+                is_estimated=False,
+                calories=106.0,
+                protein_raw=23.0,
+                protein_usable=23.0,
+                carbs=0.0,
+                fats=1.2,
+            )
+        ],
+    )
+
+    day = local_date(stored)
+    assert len(get_daily_food_logs(conn, day)) == 1

@@ -1,6 +1,5 @@
 """FastAPI web server and REST API for Nutrition Agent dashboard."""
 
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -16,6 +15,7 @@ from nutrition_agent.models import (
     MAX_WEIGHT_KG,
     MIN_WEIGHT_KG,
     CalculatedWorkoutLog,
+    parse_date_argument,
 )
 from nutrition_agent.nutrition import recalculate_food_log, validate_body_weight
 from nutrition_agent.repository import (
@@ -23,21 +23,21 @@ from nutrition_agent.repository import (
     delete_weight_log,
     delete_workout_log,
     ensure_food_catalog,
-    get_dashboard_kpis,
+    get_day_detail,
     get_food,
     get_food_log,
-    get_heatmap_data,
+    get_heatmap_for_days,
     get_unified_records,
     get_user_profile,
+    get_week_summary,
     get_weight_log,
-    get_weight_trend,
+    get_weight_trend_for_days,
     get_workout_log,
     load_foods,
     update_food_log,
     update_weight_log,
     update_workout_log,
 )
-from nutrition_agent.targets import calculate_daily_targets
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
@@ -48,6 +48,10 @@ class MessagePayload(BaseModel):
     """Incoming user message payload."""
 
     message: str
+    date: str = Field(
+        default="",
+        description="Datum, na které se má záznam zapsat; prázdné znamená dnes",
+    )
 
 
 class FoodLogEdit(BaseModel):
@@ -88,33 +92,12 @@ class WorkoutLogEdit(BaseModel):
     notes: str | None = None
 
 
-def _resolve_period_dates(period: str) -> tuple[str | None, str | None]:
-    """Convert period shorthand into start_iso and end_iso."""
-    now = datetime.now()
-    now_str = now.strftime("%Y-%m-%d")
-
-    p = period.lower().strip()
-    if p in ("7d", "7", "tyden", "tydenni", "week"):
-        start = (now - timedelta(days=6)).strftime("%Y-%m-%d")
-        return f"{start}T00:00:00", f"{now_str}T23:59:59"
-    if p in ("30d", "30", "mesic", "mesicni", "month"):
-        start = (now - timedelta(days=29)).strftime("%Y-%m-%d")
-        return f"{start}T00:00:00", f"{now_str}T23:59:59"
-    if p in ("90d", "90", "3m", "3_mesice"):
-        start = (now - timedelta(days=89)).strftime("%Y-%m-%d")
-        return f"{start}T00:00:00", f"{now_str}T23:59:59"
-    if p in ("180d", "180", "6m", "pulrok", "pulrocni"):
-        start = (now - timedelta(days=179)).strftime("%Y-%m-%d")
-        return f"{start}T00:00:00", f"{now_str}T23:59:59"
-    if p in ("365d", "365", "1y", "rok", "rocni", "year"):
-        start = (now - timedelta(days=364)).strftime("%Y-%m-%d")
-        return f"{start}T00:00:00", f"{now_str}T23:59:59"
-    if p in ("all", "vse", "kompletni"):
-        return None, None
-
-    # Default to 30 days
-    start = (now - timedelta(days=29)).strftime("%Y-%m-%d")
-    return f"{start}T00:00:00", f"{now_str}T23:59:59"
+def _parse_day_or_422(value: str) -> str:
+    """Resolve a day query parameter, turning a bad format into a 422."""
+    try:
+        return parse_date_argument(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def create_app() -> FastAPI:
@@ -138,56 +121,48 @@ def create_app() -> FastAPI:
     async def api_version():
         return {"version": __version__}
 
-    @app.get("/api/kpis")
-    async def api_kpis(period: str = Query("30d")):
-        start_iso, end_iso = _resolve_period_dates(period)
+    @app.get("/api/day")
+    async def api_day(date: str = Query("", description="YYYY-MM-DD, prázdné znamená dnes")):
+        day = _parse_day_or_422(date)
         conn = get_connection(settings.database_path)
         try:
-            kpis = get_dashboard_kpis(conn, start_iso, end_iso)
-            goal, day_type, weight = get_user_profile(conn)
-            targets = calculate_daily_targets(weight, goal, day_type)
-            kpis["goal"] = goal.value
-            kpis["day_type"] = day_type.value
-            kpis["target_calories"] = (
-                settings.target_calories if settings.target_calories else targets.calories
+            detail = get_day_detail(conn, day)
+            goal, _, weight = get_user_profile(conn)
+            detail["goal"] = goal.value
+            detail["weight_kg"] = weight
+            detail["target_calories"] = (
+                settings.target_calories if settings.target_calories else detail["target_calories"]
             )
-            kpis["target_protein"] = (
-                settings.target_protein_g if settings.target_protein_g else targets.protein_usable
+            detail["target_protein"] = (
+                settings.target_protein_g if settings.target_protein_g else detail["target_protein"]
             )
-            kpis["target_carbs"] = targets.carbs
-            kpis["target_fats"] = targets.fats
-            kpis["version"] = __version__
-            return kpis
+            detail["version"] = __version__
+            return detail
+        finally:
+            conn.close()
+
+    @app.get("/api/week")
+    async def api_week(date: str = Query("", description="Poslední den okna, prázdné je dnes")):
+        end_day = _parse_day_or_422(date)
+        conn = get_connection(settings.database_path)
+        try:
+            return get_week_summary(conn, end_day, days=7)
         finally:
             conn.close()
 
     @app.get("/api/weight-trend")
-    async def api_weight_trend(period: str = Query("30d")):
-        start_iso, end_iso = _resolve_period_dates(period)
+    async def api_weight_trend(days: int = Query(365, ge=1, le=3650)):
         conn = get_connection(settings.database_path)
         try:
-            return get_weight_trend(conn, start_iso, end_iso)
+            return get_weight_trend_for_days(conn, days)
         finally:
             conn.close()
 
     @app.get("/api/heatmap")
-    async def api_heatmap(period: str = Query("30d")):
-        start_iso, end_iso = _resolve_period_dates(period)
+    async def api_heatmap(days: int = Query(365, ge=1, le=3650)):
         conn = get_connection(settings.database_path)
         try:
-            goal, day_type, weight = get_user_profile(conn)
-            targets = calculate_daily_targets(weight, goal, day_type)
-            target_cal = settings.target_calories if settings.target_calories else targets.calories
-            target_prot = (
-                settings.target_protein_g if settings.target_protein_g else targets.protein_usable
-            )
-            return get_heatmap_data(
-                conn,
-                start_iso,
-                end_iso,
-                target_calories=target_cal,
-                target_protein=target_prot,
-            )
+            return get_heatmap_for_days(conn, days)
         finally:
             conn.close()
 
@@ -250,8 +225,9 @@ def create_app() -> FastAPI:
         ensure_food_catalog(conn, settings.foods_data_path)
         foods = load_foods(conn)
         try:
-            reply = handle_user_message(payload.message, foods, conn)
-            return {"reply": reply}
+            target_day = _parse_day_or_422(payload.date) if payload.date.strip() else None
+            reply = handle_user_message(payload.message, foods, conn, target_day=target_day)
+            return {"reply": reply, "date": target_day}
         finally:
             conn.close()
 

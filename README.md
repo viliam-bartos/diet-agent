@@ -229,25 +229,38 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 | Endpoint | Popis |
 | :--- | :--- |
 | `GET /` | HTML dashboard. |
-| `GET /api/kpis?period=` | KPI karty: aktuální váha s deltou za období, průměrné kalorie a DIAAS bílkoviny, počet odtrénovaných dní. |
-| `GET /api/weight-trend?period=` | Body jednotlivých vážení a 7denní klouzavý průměr pro Chart.js. |
-| `GET /api/heatmap?period=` | Kalendářní adherence heatmapa po dnech. |
+| `GET /api/version` | Verze běžícího serveru. |
+| `GET /api/day?date=` | Jeden den: spotřeba, cíl, zbývající hodnoty a seznam jídel. Bez data znamená dnešek. |
+| `GET /api/week?date=` | Posledních 7 dní: součty, bilance proti cílům a rozpis po dnech. |
+| `GET /api/weight-trend?days=` | Body jednotlivých vážení, 7denní klouzavý průměr a souhrnné hodnoty pro Chart.js. Výchozích 365 dní. |
+| `GET /api/heatmap?days=` | Adherence kalendář po dnech. Výchozích 365 dní. |
 | `GET /api/records?type=&limit=&offset=` | Stránkovaná a filtrovaná historie (jídla, váha, trénink). |
 | `PATCH /api/records/{typ}/{id}` | Úprava záznamu. U jídla se přepočítají makra z nové gramáže. |
 | `DELETE /api/records/{typ}/{id}` | Smazání jednoho záznamu. |
-| `POST /api/message` | Zpracuje textovou zprávu stejnou pipeline jako CLI a vrátí odpověď. |
-
-Parametr `period` přijímá `7d`, `30d`, `90d`, `180d`, `365d` a `all`.
+| `POST /api/message` | Zpracuje textovou zprávu stejnou pipeline jako CLI. Nepovinné `date` zapíše záznam na zvolený den. |
 
 ### Komponenty dashboardu
 
-- **Přepínače časového rozsahu**: 7 dní, 30 dní, 3 měsíce, 6 měsíců, 1 rok, Vše.
-- **KPI karty**: průměrný denní příjem kalorií, bílkovin, sacharidů a tuků, každá s cílem, procentem plnění a pruhem.
-- **Interaktivní graf váhy** (Chart.js): body jednotlivých vážení a spojitá čára 7denního klouzavého průměru. Aktuální váha a její změna za období jsou v hlavičce sekce.
-- **Kalendářní heatmapa** ve stylu GitHubu: zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den.
+- **Karty maker**: dnešní příjem kalorií, bílkovin, sacharidů a tuků proti dnešnímu cíli, s procentem plnění, pruhem a tím, kolik ještě zbývá. Každý den začínají od nuly.
+- **Bilance týdne**: součet příjmu za posledních 7 dní proti součtu cílů pro ty dny. Kladné číslo znamená přebytek, záporné deficit. Pod tím je rozpis po dnech, na který se dá kliknout.
+- **Interaktivní graf váhy** (Chart.js): celý rok, osa Y se škáluje podle dat. Body jednotlivých vážení a spojitá čára 7denního klouzavého průměru.
+- **Adherence kalendář**: celý rok najednou, s popisky měsíců a dny v týdnu. Zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den. Dnešní den má oranžový rámeček.
+- **Panel dne**: kliknutím na den v kalendáři nebo v týdenním rozpisu se zobrazí jeho jídla a součty. Nahoře v poli pro záznam se pak píše na vybraný den, takže se dají jídla doplnit zpětně. Tlačítkem se výběr zruší.
 - **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění jen gramáž a stav, makra a kalorie se přepočítají z hodnot potraviny, aby čísla zůstala konzistentní.
 
 Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--aperture-cyan` s fonty Barlow Semi Condensed a Space Mono.
+
+### Hranice dne
+
+Časové značky se ukládají v UTC, ale „den" znamená tvůj místní den. Dotazy na den proto filtrují přes `date(logged_at, 'localtime')`. Bez toho by jídlo zapsané mezi půlnocí a druhou hodinou ranní spadlo do předchozího dne.
+
+### Cíl pro jednotlivé dny
+
+Kalendář a týdenní bilance neporovnávají všechny dny proti jednomu cíli:
+
+- **Dnešek** se měří proti cíli podle aktivního nastavení (`den trenink` / `den odpocinek`), protože trénink ještě může přijít.
+- **Minulé dny** se měří podle toho, jestli v nich je zapsaný trénink. Den s tréninkem má vyšší cíl, den bez něj nižší. Odpočinkový den tak není hodnocen jako pod cílem jen proto, že tréninkový cíl je výš.
+
 
 ---
 

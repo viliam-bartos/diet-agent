@@ -4,7 +4,6 @@ import argparse
 import logging
 import re
 import sqlite3
-from datetime import datetime
 
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
@@ -19,7 +18,10 @@ from nutrition_agent.models import (
     FoodDefinition,
     FoodNotFoundError,
     WeightValidationError,
+    local_date,
+    local_timestamp_on,
     parse_date_argument,
+    utc_now_iso,
 )
 from nutrition_agent.nutrition import (
     build_food_from_estimate,
@@ -328,11 +330,18 @@ def handle_user_message(
     foods: list[FoodDefinition],
     conn: sqlite3.Connection,
     parse_fn=parse_user_message,
+    target_day: str | None = None,
 ) -> str:
-    """Process user message through parser, nutrition calculation, and persistence."""
+    """Process a user message through parser, nutrition calculation and persistence.
+
+    ``target_day`` backdates the resulting records to that local day (YYYY-MM-DD),
+    which the dashboard uses to fill in a past day retroactively.
+    """
     clean_input = user_input.strip()
     if not clean_input:
         return "Zadán prázdný vstup."
+
+    logged_at = local_timestamp_on(target_day) if target_day else None
 
     command_lower = clean_input.lower()
 
@@ -384,11 +393,14 @@ def handle_user_message(
             workout_type=clean_desc,
             duration_minutes=dur,
         )
+        if logged_at:
+            workout_log = workout_log.model_copy(update={"logged_at": logged_at})
         save_workout_log(conn, workout_log)
         set_user_setting(conn, "day_type", DayType.TRAINING.value)
         dur_info = f" ({dur} min)" if dur else ""
+        day_info = f" na den {target_day}" if target_day else ""
         return (
-            f"Zaznamenán trénink: {clean_desc}{dur_info}.\n"
+            f"Zaznamenán trénink: {clean_desc}{dur_info}{day_info}.\n"
             "Typ dne byl automaticky nastaven na TRAINING."
         )
 
@@ -452,12 +464,15 @@ def handle_user_message(
             raw_input=clean_input,
             weight_kg=valid_weight,
         )
+        if logged_at:
+            weight_log = weight_log.model_copy(update={"logged_at": logged_at})
         save_weight_log(conn, weight_log)
 
         goal, day_type, _ = get_user_profile(conn)
         new_targets = calculate_daily_targets(valid_weight, goal, day_type)
+        day_info = f" na den {target_day}" if target_day else ""
         return (
-            f"Zaznamenána tělesná hmotnost: {valid_weight:.1f} kg\n"
+            f"Zaznamenána tělesná hmotnost{day_info}: {valid_weight:.1f} kg\n"
             f"Cílové hodnoty byly automaticky přepočteny pro novou hmotnost ({goal.value}, "
             f"{day_type.value}): {new_targets.calories:.0f} kcal | "
             f"{new_targets.protein_usable:.1f} g DIAAS bílkovin | "
@@ -497,11 +512,16 @@ def handle_user_message(
                 amount_g,
                 conversion_estimated=conversion_estimated,
             )
+            if logged_at:
+                calculated = calculated.model_copy(update={"logged_at": logged_at})
             calculated_items.append(calculated)
 
         save_food_logs(conn, calculated_items)
 
-        lines = ["Zaznamenáno jídlo:"]
+        header = "Zaznamenáno jídlo:"
+        if target_day:
+            header = f"Zaznamenáno jídlo na den {target_day}:"
+        lines = [header]
         for item in calculated_items:
             est_flag = " (odhad množství)" if item.is_estimated else ""
             ai_flag = " [AI odhad maker]" if item.nutrition_source == "ai" else ""
@@ -546,8 +566,8 @@ def handle_user_message(
             first_name, first_unit = estimated_conversions[0]
             lines.append(f"Oprava: prevod {first_name} {first_unit} <gramy>")
 
-        today_prefix = datetime.now().strftime("%Y-%m-%d")
-        daily_foods = get_daily_food_logs(conn, today_prefix)
+        report_day = target_day or local_date(utc_now_iso())
+        daily_foods = get_daily_food_logs(conn, report_day)
         day_cal = sum(x.calories for x in daily_foods)
         day_prot = sum(x.protein_usable for x in daily_foods)
         day_carbs = sum(x.carbs for x in daily_foods)
@@ -557,6 +577,8 @@ def handle_user_message(
         targets = calculate_daily_targets(current_weight, goal, day_type)
 
         lines.append("---")
+        if target_day:
+            lines.append(f"Součet za den {report_day}:")
         lines.append(format_daily_target_breakdown(day_cal, day_prot, day_carbs, day_fats, targets))
         return "\n".join(lines)
 

@@ -19,6 +19,38 @@ def utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def local_date(iso_timestamp: str) -> str:
+    """Return the local calendar date of a stored UTC timestamp.
+
+    Timestamps are kept in UTC, but a day means the user's local day. Without this
+    a meal eaten at 00:30 local time would be grouped under the previous date.
+    """
+    try:
+        moment = datetime.fromisoformat(iso_timestamp)
+    except ValueError:
+        return iso_timestamp[:10]
+
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.astimezone().strftime("%Y-%m-%d")
+
+
+def local_timestamp_on(day: str, moment: datetime | None = None) -> str:
+    """Build a UTC ISO timestamp for the given local day, keeping the local clock time.
+
+    Used when logging food retroactively, so the record lands on the chosen day but
+    keeps a plausible time of day for ordering.
+    """
+    reference = moment or datetime.now()
+    local_moment = datetime.strptime(day, "%Y-%m-%d").replace(
+        hour=reference.hour,
+        minute=reference.minute,
+        second=reference.second,
+        microsecond=reference.microsecond,
+    )
+    return local_moment.astimezone(UTC).isoformat()
+
+
 def parse_date_argument(value: str | None) -> str:
     """Resolve an optional day argument into a 'YYYY-MM-DD' string.
 
