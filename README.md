@@ -96,6 +96,8 @@ Ekvivalentní příkaz pro ruční spuštění je `nutrition-agent --run-all --o
 
 Když dashboard zobrazí červený pruh „Server běží se starou verzí“, znamená to, že běžící proces je starší než načtená stránka. Zavři jeho okno a spusť `start.bat` znovu.
 
+Šablona stránky se čte z disku při každém požadavku, kdežto kód je v paměti procesu. Starý proces proto posílá novou stránku se starou logikou a verze přitom zůstává stejná. Pruh to pozná podle čísla `API_LEVEL`: šablona ho má zapsané a server hlásí to svoje. Když měníš tvar API, číslo zvyš v `web.py` i v šabloně; test `test_api_level_matches_between_server_and_template` pohlídá, aby si obě strany odpovídaly.
+
 ---
 
 ## Použití

@@ -988,21 +988,29 @@
     }
 
     const PAGE_VERSION = '{{APP_VERSION}}';
+    // Must match API_LEVEL in web.py; tests/test_web_api.py keeps the two in step.
+    // A process started before an API change serves this page from disk but answers
+    // with the old code, and this number is what gives it away.
+    const PAGE_API_LEVEL = 2;
 
     const REQUIRED_DAY_FIELDS = [
       'calories', 'target_calories',
       'protein_usable', 'target_protein',
       'carbs', 'target_carbs',
       'fats', 'target_fats',
-      'version',
+      'version', 'api_level',
     ];
 
     function checkVersion(data, requiredFields) {
-      const missing = requiredFields.filter(field => !(field in data));
-      if (missing.length > 0 || (data.version && data.version !== PAGE_VERSION)) {
-        const detail = missing.length > 0
-          ? `Chybí pole: ${missing.join(', ')}.`
-          : `Web je ${PAGE_VERSION}, server ${data.version}.`;
+      const missing = requiredFields.filter(field => data[field] === undefined || data[field] === null);
+      const staleApi = !missing.includes('api_level') && data.api_level !== PAGE_API_LEVEL;
+      if (missing.length > 0 || staleApi || (data.version && data.version !== PAGE_VERSION)) {
+        let detail = `Web je ${PAGE_VERSION}, server ${data.version}.`;
+        if (missing.length > 0) {
+          detail = `Server neposílá: ${missing.join(', ')}.`;
+        } else if (staleApi) {
+          detail = `Web čeká API ${PAGE_API_LEVEL}, server hlásí ${data.api_level}.`;
+        }
         showStaleBanner(detail);
         return false;
       }

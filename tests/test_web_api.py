@@ -144,7 +144,27 @@ def test_dashboard_reports_its_version_and_disables_caching(api_client: TestClie
     assert 'id="staleBanner"' in body
     assert "describeApiError" in body
 
-    assert api_client.get("/api/version").json() == {"version": __version__}
+    version = api_client.get("/api/version").json()
+    assert version["version"] == __version__
+    assert version["api_level"] == web_module.API_LEVEL
+
+
+def test_api_level_matches_between_server_and_template(api_client: TestClient):
+    """The template's API level literal must match the running code.
+
+    The template is read from disk on every request, so a process started before an
+    API change serves the new page with the old handlers. Only this number reveals
+    that mismatch, because the version string does not change.
+    """
+    from nutrition_agent.web import API_LEVEL
+
+    body = api_client.get("/").text
+    assert f"const PAGE_API_LEVEL = {API_LEVEL};" in body
+    assert "data.api_level !== PAGE_API_LEVEL" in body
+
+    day = api_client.get("/api/day").json()
+    assert day["api_level"] == API_LEVEL
+    assert "'version', 'api_level'," in body  # required fields carry the level too
 
 
 def test_day_payload_carries_version_and_every_card_field(api_client: TestClient):

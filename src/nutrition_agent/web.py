@@ -50,6 +50,12 @@ from nutrition_agent.repository import (
 
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 
+# Bumped whenever the API changes shape. The dashboard carries the same number as a
+# literal in its template and compares it with the value the server reports. A process
+# started before the change serves the new template from disk while still running the
+# old code, and the version string alone does not give that away.
+API_LEVEL: int = 2
+
 RecordType = Literal["food", "weight", "workout"]
 
 
@@ -163,7 +169,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/version")
     async def api_version():
-        return {"version": __version__}
+        return {"version": __version__, "api_level": API_LEVEL}
 
     @app.get("/api/day")
     async def api_day(date: str = Query("", description="YYYY-MM-DD, prázdné znamená dnes")):
@@ -181,6 +187,7 @@ def create_app() -> FastAPI:
                 settings.target_protein_g if settings.target_protein_g else detail["target_protein"]
             )
             detail["version"] = __version__
+            detail["api_level"] = API_LEVEL
             return detail
         finally:
             conn.close()
