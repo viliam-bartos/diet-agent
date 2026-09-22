@@ -377,3 +377,151 @@ def test_api_records_expose_editable_fields(edit_client):
     assert by_type["workout"]["workout_type"] == "Nohy"
     assert by_type["workout"]["duration_minutes"] == 60
     assert "notes" in by_type["workout"]
+
+
+def test_api_patch_food_stores_manually_typed_macros(edit_client):
+    """Typed macros are stored as they are, not recomputed from the catalog."""
+    client, ids = edit_client
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={
+            "amount_g": 200.0,
+            "state": "raw",
+            "calories": 300.0,
+            "protein_usable": 40.0,
+            "carbs": 5.0,
+            "fats": 10.0,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["calories"] == 300.0
+    assert body["protein_usable"] == 40.0
+    assert body["carbs"] == 5.0
+    assert body["fats"] == 10.0
+    assert body["nutrition_source"] == "manual"
+
+    listed = client.get("/api/records", params={"type": "food"}).json()["items"][0]
+    assert "300.0 kcal" in listed["subtitle"]
+    assert listed["nutrition_source"] == "manual"
+
+
+def test_api_patch_food_keeps_the_amount_edit_recomputing(edit_client):
+    """Without typed macros the edit still recalculates from the catalog."""
+    client, ids = edit_client
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={"amount_g": 100.0, "state": "raw"},
+    )
+    assert response.status_code == 200
+    assert response.json()["calories"] == 106.0
+    assert response.json()["nutrition_source"] == "curated"
+
+
+def test_api_patch_food_keeps_stored_alcohol(edit_client, record_db):
+    """Alcohol is not in the dialog, so a macro correction must not drop it."""
+    client, ids = edit_client
+    conn, _ = record_db
+    conn.execute("UPDATE food_logs SET alcohol = 20.0 WHERE id = ?", (ids["food"],))
+    conn.commit()
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={
+            "amount_g": 200.0,
+            "calories": 300.0,
+            "protein_usable": 40.0,
+            "carbs": 5.0,
+            "fats": 10.0,
+        },
+    )
+    assert response.status_code == 200
+
+    stored = get_food_log(conn, ids["food"])
+    assert stored is not None
+    assert stored.alcohol == 20.0
+
+
+def test_api_patch_food_can_correct_the_catalog(edit_client, record_db):
+    """The correction can be written back to the catalog, scaled to 100 g."""
+    from nutrition_agent.repository import get_food
+
+    client, ids = edit_client
+    conn, _ = record_db
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={
+            "amount_g": 200.0,
+            "state": "raw",
+            "calories": 300.0,
+            "protein_usable": 40.0,
+            "carbs": 5.0,
+            "fats": 10.0,
+            "update_catalog": True,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["catalog_updated"] is True
+
+    corrected = get_food(conn, "Kuřecí prsa")
+    assert corrected is not None
+    assert corrected.calories == 150.0
+    assert corrected.protein == 20.0
+    assert corrected.fats == 5.0
+
+    # A later amount edit now uses the corrected catalog values.
+    recomputed = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={"amount_g": 100.0, "state": "raw"},
+    )
+    assert recomputed.json()["calories"] == 150.0
+
+
+def test_api_patch_food_catalog_correction_of_a_cooked_portion(edit_client, record_db):
+    """Cooked grams are converted back to the raw basis before the catalog write."""
+    from nutrition_agent.repository import get_food
+
+    client, ids = edit_client
+    conn, _ = record_db
+
+    # 200 g cooked chicken is 250 g raw equivalent, so 100 g raw carries 40% of it.
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={
+            "amount_g": 200.0,
+            "state": "cooked",
+            "calories": 500.0,
+            "protein_usable": 50.0,
+            "carbs": 10.0,
+            "fats": 20.0,
+            "update_catalog": True,
+        },
+    )
+    assert response.status_code == 200
+
+    corrected = get_food(conn, "Kuřecí prsa")
+    assert corrected is not None
+    assert corrected.calories == 200.0
+    assert corrected.protein == 20.0
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"amount_g": 200.0, "calories": 300.0},
+        {"amount_g": 200.0, "protein_usable": 10.0},
+        {"amount_g": 200.0, "calories": -1.0, "protein_usable": 1.0, "carbs": 1.0, "fats": 1.0},
+        {"amount_g": 200.0, "calories": 0, "protein_usable": 0, "carbs": 0, "fats": 0},
+        {"amount_g": 200.0, "update_catalog": True},
+    ],
+)
+def test_api_patch_food_rejects_incomplete_manual_macros(edit_client, payload: dict):
+    """A partial or empty macro correction is refused instead of stored."""
+    client, ids = edit_client
+
+    response = client.patch(f"/api/records/food/{ids['food']}", json=payload)
+    assert response.status_code == 422
+    assert "Neplatná hodnota pole" in response.json()["detail"]

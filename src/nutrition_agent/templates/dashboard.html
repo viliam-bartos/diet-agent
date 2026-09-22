@@ -503,6 +503,23 @@
       color: var(--ink-muted);
     }
 
+    .field-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-secondary);
+      cursor: pointer;
+    }
+
+    .field-check input {
+      width: 15px;
+      height: 15px;
+      accent-color: var(--valve-orange);
+      cursor: pointer;
+    }
+
     .dialog-footer {
       padding: 14px 18px;
       border-top: var(--border-subtle);
@@ -1297,7 +1314,8 @@
           el.innerHTML =
             `<span class="day-item-time">${time}</span>` +
             `<span class="day-item-name">${item.name} (${Math.round(item.amount_g)} g)` +
-            (item.nutrition_source === 'ai' ? ' [AI odhad]' : '') + '</span>' +
+            (item.nutrition_source === 'ai' ? ' [AI odhad]' : '') +
+            (item.nutrition_source === 'manual' ? ' [ruční korekce]' : '') + '</span>' +
             `<span class="day-item-macros">${item.calories.toFixed(0)} kcal | ` +
             `B ${item.protein_usable.toFixed(1)} g | S ${item.carbs.toFixed(1)} g | ` +
             `T ${item.fats.toFixed(1)} g</span>` +
@@ -1366,6 +1384,13 @@
     // --- Record editing and deletion ---
 
     let editingRecord = null;
+    // Macros are prefilled; they are sent only when the user actually retyped one, so a
+    // plain weight or state change still recomputes them from the catalog.
+    let macrosDirty = false;
+
+    const MACRO_HINT =
+      'Makra se přepočítají z katalogu, dokud je sám neupravíš; upravená se uloží přesně ' +
+      'tak, jak jsou v polích. Alkohol zůstává beze změny.';
 
     function buildEditFields(record) {
       if (record.type === 'food') {
@@ -1373,7 +1398,6 @@
           <div class="field">
             <label for="editAmount">Hmotnost (g)</label>
             <input type="number" id="editAmount" step="0.1" min="0.1" value="${record.amount_g}" required>
-            <div class="field-hint">Makra a kalorie se přepočítají z hodnot potraviny.</div>
           </div>
           <div class="field">
             <label for="editState">Stav</label>
@@ -1382,6 +1406,27 @@
               <option value="cooked"${record.state === 'cooked' ? ' selected' : ''}>cooked (vařené)</option>
             </select>
           </div>
+          <div class="field">
+            <label for="editCalories">Kalorie (kcal)</label>
+            <input type="number" id="editCalories" step="0.1" min="0" value="${record.calories}">
+          </div>
+          <div class="field">
+            <label for="editProtein">Bílkoviny DIAAS (g)</label>
+            <input type="number" id="editProtein" step="0.1" min="0" value="${record.protein_usable}">
+          </div>
+          <div class="field">
+            <label for="editCarbs">Sacharidy (g)</label>
+            <input type="number" id="editCarbs" step="0.1" min="0" value="${record.carbs}">
+          </div>
+          <div class="field">
+            <label for="editFats">Tuky (g)</label>
+            <input type="number" id="editFats" step="0.1" min="0" value="${record.fats}">
+          </div>
+          <div class="field-hint">${MACRO_HINT}</div>
+          <label class="field-check">
+            <input type="checkbox" id="editCatalog">
+            <span>Uložit opravu i do katalogu potravin (na 100 g)</span>
+          </label>
         `;
       }
       if (record.type === 'weight') {
@@ -1410,10 +1455,18 @@
 
     function collectEditPayload(record) {
       if (record.type === 'food') {
-        return {
+        const payload = {
           amount_g: parseFloat(document.getElementById('editAmount').value),
           state: document.getElementById('editState').value
         };
+        if (macrosDirty) {
+          payload.calories = parseFloat(document.getElementById('editCalories').value);
+          payload.protein_usable = parseFloat(document.getElementById('editProtein').value);
+          payload.carbs = parseFloat(document.getElementById('editCarbs').value);
+          payload.fats = parseFloat(document.getElementById('editFats').value);
+          payload.update_catalog = document.getElementById('editCatalog').checked;
+        }
+        return payload;
       }
       if (record.type === 'weight') {
         return { weight_kg: parseFloat(document.getElementById('editWeight').value) };
@@ -1430,15 +1483,24 @@
 
     function openEditDialog(record) {
       editingRecord = record;
+      macrosDirty = false;
       document.getElementById('editDialogTitle').textContent =
         `Upravit ${TYPE_LABELS[record.type] || record.type}`;
       document.getElementById('editDialogBody').innerHTML = buildEditFields(record);
+      trackMacroEdits();
 
       const errorEl = document.getElementById('editDialogError');
       errorEl.style.display = 'none';
       errorEl.textContent = '';
 
       document.getElementById('editDialog').showModal();
+    }
+
+    function trackMacroEdits() {
+      ['editCalories', 'editProtein', 'editCarbs', 'editFats'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.addEventListener('input', () => { macrosDirty = true; });
+      });
     }
 
     function closeEditDialog() {

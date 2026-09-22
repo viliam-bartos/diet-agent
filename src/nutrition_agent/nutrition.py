@@ -421,6 +421,58 @@ def recalculate_food_log(
     )
 
 
+def apply_manual_macros(
+    existing: CalculatedFoodLog,
+    food_def: FoodDefinition,
+    amount_g: float,
+    state: str,
+    calories: float,
+    protein_usable: float,
+    carbs: float,
+    fats: float,
+    alcohol: float | None = None,
+) -> CalculatedFoodLog:
+    """Overwrite the macros of a stored log with values the user typed.
+
+    The dashboard shows protein already discounted by DIAAS, so a correction is typed
+    against that number and the raw protein is derived back through the same
+    coefficient. Alcohol is not part of the dialog; when it is not given, the stored
+    value is kept, so correcting the macros of a beer does not drop its ethanol.
+    """
+    if amount_g <= 0:
+        raise ValueError("Hmotnost potraviny musí být kladné číslo.")
+
+    coefficient = food_def.diaas_coefficient
+    protein_raw = round(protein_usable / coefficient, 2) if coefficient > 0 else protein_usable
+
+    return existing.model_copy(
+        update={
+            "amount_g": round(amount_g, 1),
+            "state": state,
+            "calories": round(calories, 1),
+            "protein_raw": protein_raw,
+            "protein_usable": round(protein_usable, 2),
+            "carbs": round(carbs, 2),
+            "fats": round(fats, 2),
+            "alcohol": existing.alcohol if alcohol is None else round(alcohol, 2),
+            "nutrition_source": "manual",
+        }
+    )
+
+
+def per_100g_from_portion(value: float, amount_g: float, state: str, food_name: str) -> float:
+    """Scale a value of the logged portion back to the raw per-100 g catalog basis.
+
+    The catalog holds raw values, so a correction typed for a cooked portion has to be
+    divided by the same cooked-to-raw ratio the log was calculated with.
+    """
+    if amount_g <= 0:
+        raise ValueError("Hmotnost potraviny musí být kladné číslo.")
+
+    ratio = get_cooked_to_raw_ratio(food_name) if state == "cooked" else 1.0
+    return round(value * 100.0 / (amount_g * ratio), 2)
+
+
 def build_food_from_estimate(estimate: EstimatedFoodNutrition) -> FoodDefinition:
     """Turn an LLM nutrition estimate into a food definition flagged as AI-sourced."""
     if estimate.calories <= 0 and estimate.protein <= 0 and estimate.carbs <= 0:

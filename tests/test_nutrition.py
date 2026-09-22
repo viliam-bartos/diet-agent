@@ -128,3 +128,112 @@ def test_calculate_food_log_rejects_non_positive_grams():
 
     with pytest.raises(ValueError, match="musí být kladné číslo"):
         calculate_food_log(item, food, "1 ks", amount_g=0.0)
+
+
+def _stored_log():
+    from nutrition_agent.models import CalculatedFoodLog
+
+    return CalculatedFoodLog(
+        id=1,
+        raw_input="300g vařené rýže",
+        food_name_matched="Rýže jasmínová (suchá)",
+        amount_g=300.0,
+        state="cooked",
+        is_estimated=False,
+        calories=426.0,
+        protein_raw=8.4,
+        protein_usable=5.88,
+        carbs=94.8,
+        fats=0.84,
+        alcohol=0.0,
+        nutrition_source="curated",
+    )
+
+
+def test_apply_manual_macros_derives_raw_protein_back():
+    """The dialog shows usable protein, so the raw one is derived through DIAAS."""
+    from nutrition_agent.models import FoodDefinition
+    from nutrition_agent.nutrition import apply_manual_macros
+
+    rice = FoodDefinition(
+        name="Rýže jasmínová (suchá)",
+        calories=355.0,
+        protein=7.0,
+        diaas_coefficient=0.70,
+        carbs=79.0,
+        fats=0.7,
+    )
+
+    updated = apply_manual_macros(
+        _stored_log(),
+        rice,
+        300.0,
+        "cooked",
+        calories=500.0,
+        protein_usable=14.0,
+        carbs=100.0,
+        fats=2.0,
+    )
+
+    assert updated.calories == 500.0
+    assert updated.protein_usable == 14.0
+    assert updated.protein_raw == 20.0  # 14 / 0.70
+    assert updated.carbs == 100.0
+    assert updated.nutrition_source == "manual"
+    assert updated.id == 1
+    assert updated.raw_input == "300g vařené rýže"
+
+
+def test_apply_manual_macros_keeps_stored_alcohol():
+    """Alcohol is not editable in the dialog, so it must survive a macro fix."""
+    from nutrition_agent.models import FoodDefinition
+    from nutrition_agent.nutrition import apply_manual_macros
+
+    beer = FoodDefinition(name="Pivo", calories=43.0, protein=0.5, carbs=3.5, fats=0.0, alcohol=4.0)
+    stored = _stored_log().model_copy(update={"alcohol": 12.0})
+
+    updated = apply_manual_macros(
+        stored, beer, 300.0, "raw", calories=129.0, protein_usable=1.5, carbs=10.5, fats=0.0
+    )
+    assert updated.alcohol == 12.0
+
+    overridden = apply_manual_macros(
+        stored,
+        beer,
+        300.0,
+        "raw",
+        calories=129.0,
+        protein_usable=1.5,
+        carbs=10.5,
+        fats=0.0,
+        alcohol=13.0,
+    )
+    assert overridden.alcohol == 13.0
+
+
+def test_apply_manual_macros_rejects_non_positive_amount():
+    """A manual correction still needs a usable weight."""
+    from nutrition_agent.models import FoodDefinition
+    from nutrition_agent.nutrition import apply_manual_macros
+
+    food = FoodDefinition(name="Test", calories=100.0, protein=1.0, carbs=1.0, fats=1.0)
+
+    with pytest.raises(ValueError, match="musí být kladné číslo"):
+        apply_manual_macros(
+            _stored_log(), food, 0.0, "raw", calories=1.0, protein_usable=1.0, carbs=1.0, fats=1.0
+        )
+
+
+def test_per_100g_from_portion_converts_cooked_grams_to_raw_basis():
+    """A correction typed for a cooked portion is scaled back through the yield ratio."""
+    from nutrition_agent.nutrition import per_100g_from_portion
+
+    # Raw: 200 g portion -> half of the per-100 g value.
+    assert per_100g_from_portion(300.0, 200.0, "raw", "Kuřecí prsa") == 150.0
+    # Cooked chicken: 200 g cooked is 250 g raw equivalent -> 40% of the value.
+    assert per_100g_from_portion(500.0, 200.0, "cooked", "Kuřecí prsa") == 200.0
+    # Cooked rice: 300 g cooked is 120 g dry -> 250% of the value.
+    assert per_100g_from_portion(142.0, 300.0, "cooked", "Rýže jasmínová (suchá)") == 118.33
+
+    with pytest.raises(ValueError, match="musí být kladné číslo"):
+        per_100g_from_portion(100.0, 0.0, "raw", "Test")

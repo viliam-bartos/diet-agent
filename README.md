@@ -235,7 +235,7 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 | `GET /api/weight-trend?days=` | Body jednotlivých vážení, 7denní klouzavý průměr a souhrnné hodnoty pro Chart.js. Výchozích 365 dní. |
 | `GET /api/heatmap?days=` | Adherence kalendář po dnech. Výchozích 365 dní. |
 | `GET /api/records?type=&limit=&offset=` | Stránkovaná a filtrovaná historie (jídla, váha, trénink). |
-| `PATCH /api/records/{typ}/{id}` | Úprava záznamu. U jídla se přepočítají makra z nové gramáže. |
+| `PATCH /api/records/{typ}/{id}` | Úprava záznamu. U jídla se přepočítají makra z nové gramáže; pošleš-li i `calories`, `protein_usable`, `carbs` a `fats`, uloží se zadané hodnoty jako ruční korekce. `update_catalog: true` zapíše opravu i do katalogu, přepočtenou na 100 g. |
 | `DELETE /api/records/{typ}/{id}` | Smazání jednoho záznamu. |
 | `POST /api/message` | Zpracuje textovou zprávu stejnou pipeline jako CLI. Nepovinné `date` zapíše záznam na zvolený den. |
 
@@ -246,7 +246,7 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 - **Interaktivní graf váhy** (Chart.js): celý rok, osa Y se škáluje podle dat. Body jednotlivých vážení a spojitá čára 7denního klouzavého průměru.
 - **Adherence kalendář**: celý rok najednou, s popisky měsíců a dny v týdnu. Zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den. Dnešní den má oranžový rámeček.
 - **Panel dne**: kliknutím na den v kalendáři nebo v týdenním rozpisu se zobrazí jeho jídla a součty. Nahoře v poli pro záznam se pak píše na vybraný den, takže se dají jídla doplnit zpětně. Tlačítkem se výběr zruší.
-- **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění jen gramáž a stav, makra a kalorie se přepočítají z hodnot potraviny, aby čísla zůstala konzistentní.
+- **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění gramáž a stav, makra a kalorie se přepočítají z hodnot potraviny. Když některé makro v dialogu přepíšeš, uloží se zadaná čísla pro ten záznam (`manual`) a volitelně se stejná oprava zapíše i do katalogu na 100 g. Alkohol se v dialogu needituje a zůstává beze změny.
 
 Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--aperture-cyan` s fonty Barlow Semi Condensed a Space Mono.
 
@@ -374,6 +374,8 @@ Párování je tolerantní, aby se odhad zbytečně nespouštěl u potravin, kte
 - **Kratší název než v katalogu.** `máslo` se spáruje s `Máslo 82%`, `cfm protein` s `Prom-IN CFM Pure Performance (syrovátkový protein)`. Stačí, když jsou všechna slova z dotazu obsažena v názvu potraviny.
 - **Bez diakritiky.** `maslo`, `sunka`, `ryze`, `kureci prsa` se přeloží na správné položky, protože se diakritika při porovnávání slov skládá. Týká se to i slovníku synonym.
 - **Kurátorovaná položka má vždy přednost.** Když je přijatelná shoda v katalogu i mezi odhady, vybere se katalogová. Odhad tedy nikdy nezastíní ověřenou potravinu.
+- **Uvedené číslo musí souhlasit.** Když v názvu stojí procento nebo jiné číslo, kandidát s jiným číslem se odmítne: `eidam 45%` se nezapíše jako `eidam 30%`, i když jsou si názvy podobné. Bez čísla v dotazu se použije jediná dostupná varianta.
+- **Název z odhadu se před uložením znovu páruje.** Model vrací potraviny pod kanonickým názvem (`eidam 30` -> `eidam 30%`), takže když odhad odpovídá katalogové položce, použije se ta a nevznikne druhý řádek s jinými hodnotami.
 
 Když se i tak spustí odhad, znamená to, že v katalogu opravdu není nic použitelného.
 

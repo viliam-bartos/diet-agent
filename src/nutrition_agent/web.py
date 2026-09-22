@@ -1,11 +1,12 @@
 """FastAPI web server and REST API for Nutrition Agent dashboard."""
 
+import sqlite3
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from nutrition_agent import __version__
 from nutrition_agent.cli import handle_user_message
@@ -14,10 +15,17 @@ from nutrition_agent.db import get_connection, init_db
 from nutrition_agent.models import (
     MAX_WEIGHT_KG,
     MIN_WEIGHT_KG,
+    CalculatedFoodLog,
     CalculatedWorkoutLog,
+    FoodDefinition,
     parse_date_argument,
 )
-from nutrition_agent.nutrition import recalculate_food_log, validate_body_weight
+from nutrition_agent.nutrition import (
+    apply_manual_macros,
+    per_100g_from_portion,
+    recalculate_food_log,
+    validate_body_weight,
+)
 from nutrition_agent.repository import (
     delete_food_log,
     delete_weight_log,
@@ -35,6 +43,7 @@ from nutrition_agent.repository import (
     get_workout_log,
     load_foods,
     update_food_log,
+    update_food_nutrition,
     update_weight_log,
     update_workout_log,
 )
@@ -55,10 +64,20 @@ class MessagePayload(BaseModel):
 
 
 class FoodLogEdit(BaseModel):
-    """Editable fields of a stored food log."""
+    """Editable fields of a stored food log.
+
+    Macros are optional as a group: without them the log is recomputed from the food
+    catalog, with them the typed numbers are stored as they are.
+    """
 
     amount_g: float
     state: Literal["raw", "cooked"] = "raw"
+    calories: float | None = None
+    protein_usable: float | None = None
+    carbs: float | None = None
+    fats: float | None = None
+    alcohol: float | None = None
+    update_catalog: bool = False
 
     @field_validator("amount_g")
     @classmethod
@@ -67,6 +86,31 @@ class FoodLogEdit(BaseModel):
         if value <= 0:
             raise ValueError("Hmotnost musí být kladné číslo.")
         return value
+
+    @field_validator("calories", "protein_usable", "carbs", "fats", "alcohol")
+    @classmethod
+    def validate_non_negative(cls, value: float | None) -> float | None:
+        """Nutrition values are never negative (Fail Fast)."""
+        if value is not None and value < 0:
+            raise ValueError("Nutriční hodnota nesmí být záporná.")
+        return value
+
+    @model_validator(mode="after")
+    def validate_manual_macros(self) -> "FoodLogEdit":
+        """Require a complete, non-empty set of manual macros."""
+        macros = (self.calories, self.protein_usable, self.carbs, self.fats)
+        if any(value is None for value in macros) and any(value is not None for value in macros):
+            raise ValueError("Vyplň kalorie i všechna tři makra, nebo je nech přepočítat.")
+        if self.macros_provided and all(value == 0 for value in macros):
+            raise ValueError("Ruční korekce nesmí vynulovat kalorie i všechna makra.")
+        if self.update_catalog and not self.macros_provided:
+            raise ValueError("Do katalogu lze uložit jen ručně zadaná makra.")
+        return self
+
+    @property
+    def macros_provided(self) -> bool:
+        """Report whether the payload carries manually typed macros."""
+        return self.calories is not None
 
 
 class WeightLogEdit(BaseModel):
@@ -242,7 +286,7 @@ def _first_error_message(error: ValidationError) -> str:
 
 
 def _update_food_record(conn, record_id: int, edit: FoodLogEdit) -> dict[str, object]:
-    """Recompute and store an edited food log."""
+    """Store an edited food log, either recomputed or with the typed macros."""
     existing = get_food_log(conn, record_id)
     if existing is None:
         raise HTTPException(status_code=404, detail="Záznam nebyl nalezen.")
@@ -257,8 +301,26 @@ def _update_food_record(conn, record_id: int, edit: FoodLogEdit) -> dict[str, ob
             ),
         )
 
-    updated = recalculate_food_log(existing, food_def, edit.amount_g, edit.state)
+    if edit.macros_provided:
+        updated = apply_manual_macros(
+            existing,
+            food_def,
+            edit.amount_g,
+            edit.state,
+            calories=edit.calories,
+            protein_usable=edit.protein_usable,
+            carbs=edit.carbs,
+            fats=edit.fats,
+            alcohol=edit.alcohol,
+        )
+    else:
+        updated = recalculate_food_log(existing, food_def, edit.amount_g, edit.state)
+
     update_food_log(conn, updated)
+
+    if edit.update_catalog:
+        _store_catalog_correction(conn, food_def, updated)
+
     return {
         "id": updated.id,
         "amount_g": updated.amount_g,
@@ -267,7 +329,30 @@ def _update_food_record(conn, record_id: int, edit: FoodLogEdit) -> dict[str, ob
         "protein_usable": updated.protein_usable,
         "carbs": updated.carbs,
         "fats": updated.fats,
+        "nutrition_source": updated.nutrition_source,
+        "catalog_updated": edit.update_catalog,
     }
+
+
+def _store_catalog_correction(
+    conn: sqlite3.Connection,
+    food_def: FoodDefinition,
+    log: CalculatedFoodLog,
+) -> None:
+    """Write the corrected log values back to the catalog, scaled to 100 g."""
+
+    def per_100g(value: float) -> float:
+        return per_100g_from_portion(value, log.amount_g, log.state, food_def.name)
+
+    update_food_nutrition(
+        conn,
+        food_def.name,
+        calories=per_100g(log.calories),
+        protein=per_100g(log.protein_raw),
+        carbs=per_100g(log.carbs),
+        fats=per_100g(log.fats),
+        alcohol=per_100g(log.alcohol),
+    )
 
 
 def _update_weight_record(conn, record_id: int, edit: WeightLogEdit) -> dict[str, object]:

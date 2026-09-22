@@ -421,7 +421,7 @@ class CalculatedFoodLog(BaseModel):
     carbs: float
     fats: float
     alcohol: float = 0.0
-    nutrition_source: Literal["curated", "ai"] = "curated"
+    nutrition_source: Literal["curated", "ai", "manual"] = "curated"
     conversion_estimated: bool = False
 
 

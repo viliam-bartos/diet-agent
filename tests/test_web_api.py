@@ -214,6 +214,23 @@ def test_dashboard_weight_chart_avoids_a_scatter_dataset(api_client: TestClient)
     assert "label: '7denní klouzavý průměr'" in chart_config
 
 
+def test_dashboard_food_dialog_offers_macro_fields(api_client: TestClient):
+    """The food edit dialog carries the macro inputs and the catalog option.
+
+    This is a proxy check: it reads the template instead of running a browser. It
+    guards the wiring the manual correction depends on, not the numbers.
+    """
+    body = api_client.get("/").text
+
+    for field in ("editCalories", "editProtein", "editCarbs", "editFats", "editCatalog"):
+        assert f'id="{field}"' in body, field
+
+    # Macros are sent only after the user retypes one, otherwise the server recomputes.
+    assert "let macrosDirty = false;" in body
+    assert "if (macrosDirty)" in body
+    assert "nutrition_source === 'manual'" in body
+
+
 def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):
     """Descriptive subtitles were removed from the section headers."""
     body = api_client.get("/").text
