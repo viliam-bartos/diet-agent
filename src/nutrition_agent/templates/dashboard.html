@@ -1130,20 +1130,24 @@
         }
 
         const weights = points.map(p => p.weight_kg);
+        // Both datasets must be lines. A 'scatter' dataset switches the x axis to a
+        // linear scale, and string dates cannot be placed on it, so every point ends
+        // up at x=null and nothing is drawn. Dots without a connecting line come from
+        // showLine:false on a category axis instead.
         weightChartInstance = new Chart(ctx, {
+          type: 'line',
           data: {
             labels: points.map(p => p.date),
             datasets: [
               {
-                type: 'scatter',
                 label: 'Naměřená váha (kg)',
-                data: points.map(p => ({ x: p.date, y: p.weight_kg })),
+                data: weights,
+                showLine: false,
                 backgroundColor: '#18181A',
                 pointRadius: 4,
                 pointHoverRadius: 6,
               },
               {
-                type: 'line',
                 label: '7denní klouzavý průměr',
                 data: points.map(p => p.moving_avg_7d),
                 borderColor: '#F05A22',

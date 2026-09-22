@@ -191,6 +191,29 @@ def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):
     assert ".level-empty { background: #E6DFC5" in body
 
 
+def test_dashboard_weight_chart_avoids_a_scatter_dataset(api_client: TestClient):
+    """The weight chart must not use a scatter dataset.
+
+    A 'scatter' dataset switches the x axis to a linear scale. The chart plots
+    string dates, which cannot be placed on a linear scale, so every point ended up
+    at x=null and the chart rendered empty. Dots without a connecting line come from
+    showLine:false on the category axis instead.
+
+    This is a proxy check: it reads the template rather than running a browser.
+    """
+    body = api_client.get("/").text
+
+    start = body.index("weightChartInstance = new Chart(")
+    end = body.index("});", body.index("plugins:", start))
+    chart_config = body[start:end]
+
+    assert "type: 'scatter'" not in chart_config
+    assert "showLine: false" in chart_config
+    assert "new Chart(ctx, {\n          type: 'line'," in chart_config
+    # The moving average stays a connected line
+    assert "label: '7denní klouzavý průměr'" in chart_config
+
+
 def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):
     """Descriptive subtitles were removed from the section headers."""
     body = api_client.get("/").text
