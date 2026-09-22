@@ -100,6 +100,18 @@ def resolve_food(
         logger.info("Potravina '%s' není v katalogu, žádám model o odhad.", food_name)
 
     estimate = estimate_food_nutrition(food_name)
+
+    # The model names a food the way the catalog usually does ('eidam 30' comes back
+    # as 'eidam 30%'), so an estimate that already exists in the catalog is used
+    # instead of being stored as a second, differently valued entry.
+    try:
+        existing, _ = find_matching_food(estimate.name, foods)
+    except FoodNotFoundError:
+        existing = None
+    if existing is not None:
+        logger.info("Odhad '%s' odpovídá katalogové potravině '%s'.", estimate.name, existing.name)
+        return existing, False
+
     learned = build_food_from_estimate(estimate)
     save_learned_food(conn, learned)
     return learned, True

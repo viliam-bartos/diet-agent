@@ -231,6 +231,56 @@ def test_curated_catalog_wins_over_ai_estimate(
     assert food_def.name == "Kuřecí prsa"
 
 
+def test_estimate_of_a_known_food_is_not_stored_as_a_duplicate(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The model's canonical name is matched against the catalog before it is learned.
+
+    'eidam 30' misses the catalog entry, the model answers with 'eidam 30%', which is
+    that entry. Storing the estimate would create a second, differently valued row.
+    """
+    import nutrition_agent.cli as cli_module
+    from nutrition_agent.cli import resolve_food
+    from nutrition_agent.models import EstimatedFoodNutrition
+    from nutrition_agent.repository import get_food
+
+    conn, foods = test_setup
+    foods.append(
+        FoodDefinition(
+            name="Eidam 30% tuku v sušině",
+            calories=273.0,
+            protein=30.0,
+            diaas_coefficient=1.0,
+            carbs=1.5,
+            fats=16.7,
+        )
+    )
+
+    def fake_estimate(name: str, **kwargs) -> EstimatedFoodNutrition:
+        return EstimatedFoodNutrition(
+            name="eidam 30%",
+            calories=255.0,
+            protein=29.0,
+            carbs=1.0,
+            fats=15.0,
+            protein_category="animal",
+        )
+
+    monkeypatch.setattr(cli_module, "estimate_food_nutrition", fake_estimate)
+
+    food_def, was_learned = resolve_food(conn, "eidam 30", foods)
+
+    assert was_learned is False
+    assert food_def.name == "Eidam 30% tuku v sušině"
+    assert food_def.calories == 273.0
+
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM foods WHERE source = 'ai'")
+    assert cursor.fetchone()[0] == 0
+    assert get_food(conn, "eidam 30%") is None
+
+
 def test_estimator_failure_is_reported_and_saves_nothing(
     test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
     monkeypatch: pytest.MonkeyPatch,

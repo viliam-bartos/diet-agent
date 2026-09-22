@@ -7,6 +7,7 @@ from nutrition_agent.nutrition import (
     find_matching_food,
     food_tokens,
     is_token_subset,
+    quantity_tokens,
     strip_diacritics,
 )
 
@@ -116,3 +117,32 @@ def test_unknown_food_still_fails_fast():
 
     with pytest.raises(FoodNotFoundError):
         find_matching_food("pneumatika", CATALOG)
+
+
+def test_quantity_tokens_normalizes_percentages():
+    """Comma and dot spellings of the same number compare equal."""
+    assert quantity_tokens("Máslo 82%") == {"82"}
+    assert quantity_tokens("Mléko 1,5 %") == {"1.5"}
+    assert quantity_tokens("Kečup") == set()
+
+
+def test_stated_percentage_must_agree_with_the_candidate():
+    """A stated fat content is a different variant, not a typo to correct."""
+    from nutrition_agent.models import FoodNotFoundError
+
+    foods = [_food("Eidam 30% tuku v sušině")]
+    assert find_matching_food("eidam 30%", foods)[0].name == "Eidam 30% tuku v sušině"
+    assert find_matching_food("eidam 30", foods)[0].name == "Eidam 30% tuku v sušině"
+    # Without a stated fat content the only variant is still the best guess.
+    assert find_matching_food("eidam", foods)[0].name == "Eidam 30% tuku v sušině"
+    with pytest.raises(FoodNotFoundError):
+        find_matching_food("eidam 45%", foods)
+
+
+def test_duplicate_number_lookalike_does_not_match():
+    """'eidam 45%' scores high against 'eidam 30%' but describes another cheese."""
+    from nutrition_agent.models import FoodNotFoundError
+
+    foods = [_food("eidam 30%", source="ai")]
+    with pytest.raises(FoodNotFoundError):
+        find_matching_food("eidam 45%", foods)

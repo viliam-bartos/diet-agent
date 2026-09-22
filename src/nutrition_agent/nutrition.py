@@ -184,6 +184,19 @@ def food_tokens(name: str) -> set[str]:
     return {token for token in re.split(r"[^\w]+", folded) if token}
 
 
+# Numbers in a food name, e.g. the fat content of a cheese or a cocoa share.
+NUMBER_PATTERN = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def quantity_tokens(name: str) -> set[str]:
+    """Extract the numeric values of a food name in a comparable form.
+
+    '1,5 %' and '1.5%' both become '1.5', so a hand-typed comma still matches the
+    catalog spelling of the same variant.
+    """
+    return {f"{float(raw.replace(',', '.')):g}" for raw in NUMBER_PATTERN.findall(name)}
+
+
 def is_token_subset(query: str, candidate: str) -> bool:
     """Report whether every word of the query appears in the candidate name.
 
@@ -208,6 +221,9 @@ def find_matching_food(
           by token_sort_ratio so an uncertain mapping is logged as such.
         - Otherwise: rejected with FoodNotFoundError (Fail Fast).
 
+    A stated number identifies a variant, so a candidate whose numbers contradict
+    the query is never accepted: 'eidam 45%' must not be logged as 'eidam 30%'.
+
     A curated catalog entry always wins over an AI-estimated one whenever both are
     acceptable, so an estimate can never shadow a verified food.
 
@@ -229,6 +245,7 @@ def find_matching_food(
     acceptable: list[tuple[FoodDefinition, float, bool]] = []
     best_food: FoodDefinition | None = None
     best_score: float = -1.0
+    query_numbers = quantity_tokens(matched_query)
 
     for food in foods:
         candidate_name = food.name.strip().lower()
@@ -237,6 +254,10 @@ def find_matching_food(
         if score > best_score:
             best_score = score
             best_food = food
+
+        candidate_numbers = quantity_tokens(candidate_name)
+        if query_numbers and candidate_numbers and not query_numbers <= candidate_numbers:
+            continue
 
         contained = is_token_subset(matched_query, candidate_name)
         if score >= MIN_FOOD_MATCH_SCORE or contained:
