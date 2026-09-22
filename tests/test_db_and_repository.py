@@ -159,3 +159,83 @@ def test_config_supports_foods_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
     s = Settings.load()
     assert s.foods_data_path.as_posix() == "custom/foods_db.json"
     assert s.foods_db_path == s.foods_data_path
+
+
+def test_day_type_is_stored_per_date(mem_db: sqlite3.Connection) -> None:
+    """A day type belongs to one date and never leaks into the next day."""
+    from nutrition_agent.repository import get_day_type, set_day_type
+    from nutrition_agent.targets import DayType
+
+    set_day_type(mem_db, "2026-09-21", DayType.TRAINING)
+
+    assert get_day_type(mem_db, "2026-09-21") == DayType.TRAINING
+    assert get_day_type(mem_db, "2026-09-22") == DayType.REST
+
+    set_day_type(mem_db, "2026-09-21", DayType.REST)
+    assert get_day_type(mem_db, "2026-09-21") == DayType.REST
+
+    with pytest.raises(ValueError, match="training"):
+        set_day_type(mem_db, "2026-09-21", "svátek")
+
+
+def test_day_type_falls_back_to_the_logged_workout(mem_db: sqlite3.Connection) -> None:
+    """A logged workout makes its own day a training day; an explicit choice wins."""
+    from nutrition_agent.models import CalculatedWorkoutLog
+    from nutrition_agent.repository import get_day_type, save_workout_log, set_day_type
+    from nutrition_agent.targets import DayType
+
+    save_workout_log(
+        mem_db,
+        CalculatedWorkoutLog(
+            logged_at="2026-09-21T17:00:00+00:00",
+            raw_input="trenink gym 60 min",
+            workout_type="gym",
+            duration_minutes=60,
+        ),
+    )
+
+    assert get_day_type(mem_db, "2026-09-21") == DayType.TRAINING
+    assert get_day_type(mem_db, "2026-09-20") == DayType.REST
+
+    # An explicit statement about the same day beats the inference.
+    set_day_type(mem_db, "2026-09-21", DayType.REST)
+    assert get_day_type(mem_db, "2026-09-21") == DayType.REST
+
+
+def test_init_db_moves_the_old_global_day_type_onto_its_date() -> None:
+    """The old single setting is migrated to the day it was written on.
+
+    Leaving it as one value for all days is what made the day after a workout look like
+    a training day.
+    """
+    from pathlib import Path
+
+    from nutrition_agent.db import SCHEMA_SQL, _migrate_stored_day_type
+
+    # The OS temp directory is not writable in the sandbox, so the file lives in the repo.
+    test_dir = Path(__file__).resolve().parent.parent / ".tmp" / "tests"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    db_path = test_dir / "legacy_day_type.db"
+    db_path.unlink(missing_ok=True)
+
+    conn = get_connection(db_path)
+    conn.executescript(SCHEMA_SQL)
+    conn.execute(
+        "INSERT INTO user_settings (key, value, updated_at) VALUES ('day_type', ?, ?)",
+        ("training", "2026-09-21T17:05:38.373726+00:00"),
+    )
+    conn.commit()
+
+    _migrate_stored_day_type(conn)
+    conn.commit()
+
+    rows = {row["date"]: row["day_type"] for row in conn.execute("SELECT * FROM day_types")}
+    assert list(rows) == ["2026-09-21"]
+    assert rows["2026-09-21"] == "training"
+    remaining = conn.execute("SELECT COUNT(*) FROM user_settings WHERE key = 'day_type'")
+    assert remaining.fetchone()[0] == 0
+
+    # Running it again changes nothing and does not raise.
+    _migrate_stored_day_type(conn)
+    assert conn.execute("SELECT COUNT(*) FROM day_types").fetchone()[0] == 1
+    conn.close()

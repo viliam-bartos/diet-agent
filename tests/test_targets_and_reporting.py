@@ -17,6 +17,7 @@ from nutrition_agent.repository import (
     get_user_profile,
     save_food_logs,
     save_weight_log,
+    set_day_type,
     set_user_setting,
 )
 from nutrition_agent.targets import (
@@ -138,7 +139,7 @@ def populated_db() -> sqlite3.Connection:
     conn = get_connection(":memory:")
     conn.executescript(SCHEMA_SQL)
     set_user_setting(conn, "goal", DietGoal.LEAN_BULK.value)
-    set_user_setting(conn, "day_type", DayType.TRAINING.value)
+    set_day_type(conn, datetime.now().strftime("%Y-%m-%d"), DayType.TRAINING)
 
     # 3 days of food logs
     days = ["2026-09-15", "2026-09-16", "2026-09-17"]

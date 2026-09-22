@@ -50,6 +50,7 @@ from nutrition_agent.repository import (
     save_unit_conversion,
     save_weight_log,
     save_workout_log,
+    set_day_type,
     set_user_setting,
     update_food_nutrition,
 )
@@ -399,12 +400,14 @@ def handle_user_message(
             day_type = parse_day_type(parts[1])
         except ValueError as exc:
             return str(exc)
-        set_user_setting(conn, "day_type", day_type.value)
+        day = target_day or local_date(utc_now_iso())
+        set_day_type(conn, day, day_type)
         goal, _, weight = get_user_profile(conn)
         targets = calculate_daily_targets(weight, goal, day_type)
+        day_info = f" na den {day}" if day != local_date(utc_now_iso()) else ""
         return (
-            f"Typ dne byl nastaven na: {day_type.value.upper()}.\n"
-            f"Aktuální denní cíle ({goal.value}, {weight:.1f} kg):\n"
+            f"Typ dne{day_info} byl nastaven na: {day_type.value.upper()}.\n"
+            f"Denní cíle pro tento den ({goal.value}, {weight:.1f} kg):\n"
             f"Energie: {targets.calories:.0f} kcal | "
             f"Bílkoviny: {targets.protein_usable:.1f} g DIAAS | "
             f"Sacharidy: {targets.carbs:.1f} g | "
@@ -425,12 +428,12 @@ def handle_user_message(
         if logged_at:
             workout_log = workout_log.model_copy(update={"logged_at": logged_at})
         save_workout_log(conn, workout_log)
-        set_user_setting(conn, "day_type", DayType.TRAINING.value)
+        set_day_type(conn, target_day or local_date(utc_now_iso()), DayType.TRAINING)
         dur_info = f" ({dur} min)" if dur else ""
         day_info = f" na den {target_day}" if target_day else ""
         return (
             f"Zaznamenán trénink: {clean_desc}{dur_info}{day_info}.\n"
-            "Typ dne byl automaticky nastaven na TRAINING."
+            "Tento den je označený jako TRAINING."
         )
 
     if first_token in ("vymaz", "vymaž", "smaz", "smaž", "delete"):
@@ -622,7 +625,7 @@ def run_interactive_loop(foods: list[FoodDefinition], conn: sqlite3.Connection) 
 
     print("Nutrition Agent spuštěn.")
     print(
-        f"Aktivní profil: {goal.value.upper()} | {day_type.value.upper()} | "
+        f"Aktivní profil: {goal.value.upper()} | dnešek: {day_type.value.upper()} | "
         f"{weight:.1f} kg ({targets.calories:.0f} kcal)"
     )
     print("Příkazy: 'dnes', 'tyden', 'mesic', 'pulrok', 'rok', 'vse', 'historie'")
@@ -842,7 +845,7 @@ def main() -> None:
 
         if args.day_type:
             day_type = parse_day_type(args.day_type)
-            set_user_setting(conn, "day_type", day_type.value)
+            set_day_type(conn, local_date(utc_now_iso()), day_type)
             print(f"Typ dne nastaven na: {day_type.value}")
 
         if args.delete_day is not None:

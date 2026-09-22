@@ -53,6 +53,12 @@ CREATE TABLE IF NOT EXISTS workout_logs (
 
 CREATE INDEX IF NOT EXISTS idx_workout_logs_logged_at ON workout_logs(logged_at);
 
+CREATE TABLE IF NOT EXISTS day_types (
+    date TEXT PRIMARY KEY,
+    day_type TEXT NOT NULL CHECK (day_type IN ('training', 'rest')),
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS foods (
     name TEXT PRIMARY KEY,
     name_key TEXT NOT NULL UNIQUE,
@@ -186,9 +192,37 @@ def _migrate_foods_lookup_key(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE foods_legacy")
 
 
+def _migrate_stored_day_type(conn: sqlite3.Connection) -> None:
+    """Move the old global day_type setting onto the date it was written.
+
+    The setting used to be one value for all days, so a workout logged on Monday made
+    Tuesday look like a training day too. The value belongs to the day it was chosen on;
+    every later day starts without one.
+    """
+    if not _table_exists(conn, "user_settings") or not _table_exists(conn, "day_types"):
+        return
+
+    legacy = conn.execute(
+        "SELECT value, updated_at FROM user_settings WHERE key = 'day_type'"
+    ).fetchone()
+    if legacy is None or legacy["value"] not in ("training", "rest"):
+        return
+
+    conn.execute(
+        """
+        INSERT INTO day_types (date, day_type, updated_at)
+        VALUES (date(?, 'localtime'), ?, ?)
+        ON CONFLICT(date) DO NOTHING
+        """,
+        (legacy["updated_at"], legacy["value"], legacy["updated_at"]),
+    )
+    conn.execute("DELETE FROM user_settings WHERE key = 'day_type'")
+
+
 def init_db(db_path: str | Path) -> None:
     """Initialize SQLite tables, indices and pending migrations."""
     with get_connection(db_path) as conn:
         _migrate_foods_lookup_key(conn)
         conn.executescript(SCHEMA_SQL)
         _apply_column_migrations(conn)
+        _migrate_stored_day_type(conn)

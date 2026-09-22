@@ -6,12 +6,18 @@ import pytest
 
 from nutrition_agent.cli import handle_user_message
 from nutrition_agent.db import SCHEMA_SQL, get_connection
-from nutrition_agent.models import ExtractedFoodItem, FoodDefinition, UserLog
+from nutrition_agent.models import (
+    ExtractedFoodItem,
+    FoodDefinition,
+    UserLog,
+    local_date,
+    utc_now_iso,
+)
 from nutrition_agent.repository import (
+    get_day_type,
     get_user_profile,
-    get_user_setting,
     get_workout_logs_in_range,
-    set_user_setting,
+    set_day_type,
 )
 from nutrition_agent.targets import DayType
 
@@ -371,11 +377,8 @@ def test_handle_command_historie(
 def test_handle_workout_command_with_duration(
     test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
 ) -> None:
-    """'trenink' command logs a workout and switches the day to TRAINING."""
+    """'trenink' command logs a workout and marks today as a training day."""
     conn, foods = test_setup
-
-    # Start from a rest day so the automatic switch is observable
-    set_user_setting(conn, "day_type", DayType.REST.value)
 
     result = handle_user_message("trenink nohy 60 min", foods, conn)
     assert "Zaznamenán trénink: nohy" in result
@@ -388,7 +391,7 @@ def test_handle_workout_command_with_duration(
     assert logs[0].duration_minutes == 60
     assert logs[0].raw_input == "trenink nohy 60 min"
 
-    assert get_user_setting(conn, "day_type") == DayType.TRAINING.value
+    assert get_day_type(conn, local_date(utc_now_iso())) == DayType.TRAINING
 
 
 def test_handle_workout_command_without_duration(
@@ -429,11 +432,33 @@ def test_handle_goal_and_day_type_switching(
     assert "Neznámý typ dne" in handle_user_message("den nesmysl", foods, conn)
 
 
+def test_den_command_changes_one_day_only(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """'den trenink' marks the day it was written for, not every following day."""
+    from datetime import datetime, timedelta
+
+    conn, foods = test_setup
+    today = local_date(utc_now_iso())
+    tomorrow = (datetime.strptime(today, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+    handle_user_message("den trenink", foods, conn)
+
+    assert get_day_type(conn, today) == DayType.TRAINING
+    assert get_day_type(conn, tomorrow) == DayType.REST
+
+    # Backdating from the dashboard writes to the selected day instead.
+    handle_user_message("den odpocinek", foods, conn, target_day="2026-09-10")
+    assert get_day_type(conn, "2026-09-10") == DayType.REST
+    assert get_day_type(conn, today) == DayType.TRAINING
+
+
 def test_handle_weight_log_recomputes_targets(
     test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
 ) -> None:
     """Logging a new weight reports automatically recomputed targets."""
     conn, foods = test_setup
+    set_day_type(conn, local_date(utc_now_iso()), DayType.TRAINING)
 
     def mock_weight(msg: str) -> UserLog:
         return UserLog(log_type="WEIGHT", weight_kg=90.0)

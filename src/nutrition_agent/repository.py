@@ -526,22 +526,53 @@ def set_user_setting(
     conn.commit()
 
 
-def get_user_profile(conn: sqlite3.Connection) -> tuple[DietGoal, DayType, float]:
-    """Return active (DietGoal, DayType, current_weight_kg)."""
-    raw_goal = get_user_setting(conn, "goal", DietGoal.LEAN_BULK.value) or DietGoal.LEAN_BULK.value
-    raw_day_type = (
-        get_user_setting(conn, "day_type", DayType.TRAINING.value) or DayType.TRAINING.value
+def set_day_type(conn: sqlite3.Connection, day: str, day_type: DayType | str) -> None:
+    """Store the day type of one specific local date.
+
+    The type belongs to a date. A workout logged on Monday must not make Tuesday look
+    like a training day, which is what a single stored value used to do.
+    """
+    value = day_type.value if isinstance(day_type, DayType) else str(day_type)
+    if value not in (DayType.TRAINING.value, DayType.REST.value):
+        raise ValueError("Typ dne musí být 'training' nebo 'rest'.")
+
+    conn.execute(
+        """
+        INSERT INTO day_types (date, day_type, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET
+            day_type = excluded.day_type,
+            updated_at = excluded.updated_at
+        """,
+        (day, value, utc_now_iso()),
     )
+    conn.commit()
+
+
+def get_day_type(conn: sqlite3.Connection, day: str) -> DayType:
+    """Resolve one day's type: what the user chose, otherwise what was logged.
+
+    A day without an explicit choice and without a workout is a rest day. The app never
+    claims a training day that nobody announced.
+    """
+    row = conn.execute("SELECT day_type FROM day_types WHERE date = ?", (day,)).fetchone()
+    if row is not None:
+        return DayType(row["day_type"])
+    if get_daily_workout_log(conn, day) is not None:
+        return DayType.TRAINING
+    return DayType.REST
+
+
+def get_user_profile(conn: sqlite3.Connection) -> tuple[DietGoal, DayType, float]:
+    """Return active (DietGoal, DayType of today, current_weight_kg)."""
+    raw_goal = get_user_setting(conn, "goal", DietGoal.LEAN_BULK.value) or DietGoal.LEAN_BULK.value
 
     try:
         goal = DietGoal(raw_goal)
     except ValueError:
         goal = DietGoal.LEAN_BULK
 
-    try:
-        day_type = DayType(raw_day_type)
-    except ValueError:
-        day_type = DayType.TRAINING
+    day_type = get_day_type(conn, local_date(utc_now_iso()))
 
     latest_weight = get_latest_weight_log(conn)
     if latest_weight is not None:
@@ -905,8 +936,8 @@ def get_day_summaries(
 ) -> list[dict[str, object]]:
     """Build per-day totals and targets for every local day in the inclusive range.
 
-    Each day is measured against its own target: a day with a logged workout uses the
-    training target, other days use the rest target.
+    Each day is measured against its own target. An explicitly chosen day type wins, a
+    logged workout makes the day a training day, and anything else is a rest day.
     """
     from collections import defaultdict
     from datetime import datetime, timedelta
@@ -932,8 +963,14 @@ def get_day_summaries(
     for workout in workout_logs:
         daily_workout[local_date(workout.logged_at)] = workout
 
-    today = local_date(utc_now_iso())
-    _, configured_day_type, _ = get_user_profile(conn)
+    explicit_types = {
+        row["date"]: DayType(row["day_type"])
+        for row in conn.execute(
+            "SELECT date, day_type FROM day_types WHERE date BETWEEN ? AND ?",
+            (start_day, end_day),
+        )
+    }
+
     summaries: list[dict[str, object]] = []
 
     current = datetime.strptime(start_day, "%Y-%m-%d")
@@ -942,13 +979,15 @@ def get_day_summaries(
         day = current.strftime("%Y-%m-%d")
         workout = daily_workout.get(day)
 
-        # Today follows the configured setting because a workout may still be ahead.
-        # Past days are inferred from whether a workout was actually logged, so a rest
-        # day is not judged against the higher training target.
-        if day >= today:
-            day_type = configured_day_type
+        # A day is a training day only when the user said so or a workout was logged in
+        # it; otherwise it is a rest day, and today is no exception.
+        chosen_type = explicit_types.get(day)
+        if chosen_type is not None:
+            day_type = chosen_type
+        elif workout:
+            day_type = DayType.TRAINING
         else:
-            day_type = DayType.TRAINING if workout else DayType.REST
+            day_type = DayType.REST
 
         targets = calculate_daily_targets(weight, goal, day_type)
         calories = daily_calories.get(day, 0.0)

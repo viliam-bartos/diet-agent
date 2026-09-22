@@ -30,7 +30,7 @@ from nutrition_agent.repository import (
     load_foods,
     save_weight_log,
     save_workout_log,
-    set_user_setting,
+    set_day_type,
 )
 from nutrition_agent.targets import DayType, calculate_daily_targets
 
@@ -316,14 +316,14 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
                 notes=poznamka or None,
             )
             save_workout_log(conn, log)
-            set_user_setting(conn, "day_type", DayType.TRAINING.value)
+            set_day_type(conn, datetime.now().strftime("%Y-%m-%d"), DayType.TRAINING)
 
             embed = discord.Embed(
                 title="Trénink zaznamenán",
                 description=(
                     f"Trénink: **{typ}** ({delka_min} min)\n"
                     f"{'Poznámka: ' + poznamka if poznamka else ''}\n"
-                    "Typ dne byl automaticky nastaven na **TRAINING**."
+                    "Dnešek je označený jako **TRAINING**."
                 ),
                 color=discord.Color.orange(),
             )

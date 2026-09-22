@@ -307,6 +307,47 @@ def test_heatmap_levels_and_workout_markers(seeded_db: sqlite3.Connection):
             assert cell["level"] == "blue", cell["date"]
 
 
+def test_a_workout_yesterday_does_not_make_today_a_training_day():
+    """The day type is per date: yesterday's workout must not decide today's target.
+
+    A single stored value used to carry over, so the morning after a workout the
+    dashboard announced a training day nobody had asked for.
+    """
+    from nutrition_agent.repository import set_day_type
+    from nutrition_agent.targets import DayType
+
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    save_workout_log(
+        conn,
+        CalculatedWorkoutLog(
+            logged_at=f"{yesterday}T17:00:00+00:00",
+            raw_input="trenink gym 60 min",
+            workout_type="gym",
+            duration_minutes=60,
+        ),
+    )
+
+    cells = {c["date"]: c for c in get_day_summaries(conn, yesterday, today)}
+
+    assert cells[yesterday]["day_type"] == "training"
+    assert cells[yesterday]["has_workout"] is True
+    # Nothing was logged or announced for today, so it is a rest day.
+    assert cells[today]["day_type"] == "rest"
+    assert cells[today]["has_workout"] is False
+    assert cells[today]["target_calories"] < cells[yesterday]["target_calories"]
+
+    # Saying so explicitly switches only that one day.
+    set_day_type(conn, today, DayType.TRAINING)
+    cells = {c["date"]: c for c in get_day_summaries(conn, yesterday, today)}
+    assert cells[today]["day_type"] == "training"
+    assert cells[yesterday]["day_type"] == "training"
+
+
 def test_heatmap_uses_per_day_targets(seeded_db: sqlite3.Connection):
     """A rest day is not punished for missing the higher training target."""
     cells = get_heatmap_data(seeded_db, "2026-09-08T00:00:00", "2026-09-17T23:59:59")

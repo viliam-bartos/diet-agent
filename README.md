@@ -149,11 +149,11 @@ Příklady vstupů:
 - `Dneska k obědu 200g kuřecích prsou a 150g rýže`
 - `Váha 83.2 kg` (automaticky přepočítá nutriční cíle pro novou váhu)
 - `2 vejce a 1 banán`
-- `trenink nohy 60 min` (zaznamená trénink a přepne den na TRAINING)
+- `trenink nohy 60 min` (zaznamená trénink a označí ten den jako TRAINING)
 - `dnes` nebo `prehled` pro zobrazení denního souhrnu, plnění cílů a zbývajících hodnot
 - `tyden`, `mesic`, `pulrok`, `rok`, `vse` pro agregované přehledy s grafy
 - `cil bulk`, `cil maintenance`, `cil cut` pro změnu aktivního stavu
-- `den trenink` nebo `den odpocinek` pro přepnutí tréninkového stavu
+- `den trenink` nebo `den odpocinek` pro nastavení typu dne (platí pro den, na který se píše)
 - `historie` pro zobrazení posledních záznamů
 - `vymaz` pro smazání dnešních záznamů, `vymaz vcera` nebo `vymaz 2026-09-15` pro jiný den
 - `jidlo kuřecí kari` pro zobrazení nebo opravu hodnot potraviny v katalogu
@@ -179,9 +179,9 @@ nutrition-agent --year        # Roční souhrn (posledních 365 dní)
 nutrition-agent --all         # Kompletní souhrn ze všech dat
 ```
 
-Nastavení aktivního cíle a typu dne:
+Nastavení aktivního cíle a typu dnešního dne:
 ```bash
-nutrition-agent --goal lean_bulk   # Možnosti: lean_bulk, maintenance, cut
+nutrition-agent --goal lean_bulk    # Možnosti: lean_bulk, maintenance, cut
 nutrition-agent --day-type training # Možnosti: training, rest
 ```
 
@@ -245,7 +245,7 @@ Zpráva v DM nebo ve vyhrazeném kanálu (např. `200g kuřecích prsou a 150g r
 | :--- | :--- |
 | `/dnes` | Mobilní přehled: hmotnost s deltou proti předchozímu vážení, status tréninku, makra s textovými progress bary a seznam dnešních jídel podle času. |
 | `/vaha <hodnota>` | Okamžitý záznam hmotnosti s validací a automatickým přepočtem cílů. |
-| `/trenink [typ] [delka_min] [poznamka]` | Rychlý záznam tréninku a přepnutí typu dne na TRAINING. |
+| `/trenink [typ] [delka_min] [poznamka]` | Rychlý záznam tréninku; dnešek se označí jako TRAINING. |
 | `/prehled <obdobi>` | Textová tabulka za období (`tyden`, `mesic`, `pulrok`, `rok`, `vse`). |
 | `/vymaz [datum]` | Smaže všechny záznamy za den (`dnes`, `vcera` nebo `RRRR-MM-DD`). Před smazáním zobrazí, co se odstraní, a vyžádá potvrzení tlačítkem. |
 | `/web` | Přímý odkaz na webový dashboard. |
@@ -292,10 +292,13 @@ Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--apert
 
 ### Cíl pro jednotlivé dny
 
-Kalendář a týdenní bilance neporovnávají všechny dny proti jednomu cíli:
+Typ dne patří ke konkrétnímu datu, není to jedno globální nastavení. Pro každý den se určí takto:
 
-- **Dnešek** se měří proti cíli podle aktivního nastavení (`den trenink` / `den odpocinek`), protože trénink ještě může přijít.
-- **Minulé dny** se měří podle toho, jestli v nich je zapsaný trénink. Den s tréninkem má vyšší cíl, den bez něj nižší. Odpočinkový den tak není hodnocen jako pod cílem jen proto, že tréninkový cíl je výš.
+1. **Co jsi řekl** — `den trenink` / `den odpocinek` zapíše typ na ten den, na který zrovna píšeš (v dashboardu tedy i na vybraný den v minulosti).
+2. **Co jsi skutečně zaznamenal** — den se zapsaným tréninkem je tréninkový.
+3. **Jinak odpočinkový den.** Aplikace nikdy netvrdí tréninkový den, který jsi neoznámil.
+
+Dřív to byla jedna hodnota pro všechny dny, takže pondělní trénink dělal tréninkový i úterek. Kvůli tomu se den po tréninku zobrazoval vyšší cíl, i když o něm nikdo nic neřekl. Stará hodnota se při prvním startu přesune na den, kdy vznikla; všechny další dny začínají bez ní.
 
 
 ---
@@ -424,13 +427,14 @@ Když se i tak spustí odhad, znamená to, že v katalogu opravdu není nic pou�
 | `food_logs` | Záznamy jídel s makry, DIAAS bílkovinami a zdrojem hodnot (`nutrition_source`). |
 | `weight_logs` | Záznamy tělesné hmotnosti. |
 | `workout_logs` | Záznamy tréninků (typ, délka, poznámka). |
+| `day_types` | Zvolený typ dne pro konkrétní datum (`training` / `rest`). |
 | `foods` | Katalog potravin, kurátorovaný i odhadnutý, s vyhledávacím klíčem `name_key`. |
 | `unit_conversions` | Naučené převody kuchyňských měr na gramy pro konkrétní potraviny. |
-| `user_settings` | Aktivní cíl, typ dne a referenční hodnoty profilu. |
+| `user_settings` | Aktivní cíl a referenční hodnoty profilu. |
 
 Sloupec `name_key` drží název převedený na malá písmena přes Python, protože SQLite vestavěná kolace `NOCASE` skládá jen ASCII a `KUŘECÍ` by se s `kuřecí` neshodovalo.
 
-Schéma se inicializuje idempotentně při startu CLI, webu i bota. Databáze z starší verze se automaticky doplní o chybějící sloupce a tabulky; kurátorované potraviny se dosévají přes `INSERT ... ON CONFLICT DO NOTHING`, takže tvoje opravy ani naučené potraviny se nikdy nepřepíšou.
+Schéma se inicializuje idempotentně při startu CLI, webu i bota. Databáze z starší verze se automaticky doplní o chybějící sloupce a tabulky; kurátorované potraviny se dosévají přes `INSERT ... ON CONFLICT DO NOTHING`, takže tvoje opravy ani naučené potraviny se nikdy nepřepíšou. Stará globální hodnota `day_type` se při prvním startu přesune do `day_types` na datum, kdy vznikla.
 
 ---
 
@@ -477,7 +481,7 @@ Cíl se tedy sám mění, když:
 
 - zaznamenáš novou váhu (CLI, Discord `/vaha`, nebo zprávou),
 - přepneš stav přes `cil bulk|maintenance|cut`,
-- přepneš typ dne přes `den trenink|odpocinek`.
+- přepneš typ dne přes `den trenink|odpocinek` (týká se jen toho dne),
 
 Dvě věci stojí za pozornost:
 
