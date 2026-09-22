@@ -208,22 +208,6 @@
     "fats": 0.2
   },
   {
-    "name": "Banán",
-    "calories": 88.0,
-    "protein": 1.1,
-    "diaas_coefficient": 0.50,
-    "carbs": 22.8,
-    "fats": 0.3
-  },
-  {
-    "name": "Kuřecí prsa (syrová)",
-    "calories": 106.0,
-    "protein": 23.0,
-    "diaas_coefficient": 1.00,
-    "carbs": 0.0,
-    "fats": 1.2
-  },
-  {
     "name": "Kuřecí stehno pečené (maso bez kosti)",
     "calories": 217.0,
     "protein": 23.3,
@@ -238,14 +222,6 @@
     "diaas_coefficient": 1.00,
     "carbs": 0.0,
     "fats": 4.2
-  },
-  {
-    "name": "Vejce slepičí celé",
-    "calories": 140.0,
-    "protein": 12.0,
-    "diaas_coefficient": 1.00,
-    "carbs": 0.7,
-    "fats": 10.0
   },
   {
     "name": "Eidam 30% tuku v sušině",
