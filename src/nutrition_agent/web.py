@@ -22,6 +22,7 @@ from nutrition_agent.models import (
 )
 from nutrition_agent.nutrition import (
     apply_manual_macros,
+    complete_manual_macros,
     per_100g_from_portion,
     recalculate_food_log,
     validate_body_weight,
@@ -54,7 +55,7 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 # literal in its template and compares it with the value the server reports. A process
 # started before the change serves the new template from disk while still running the
 # old code, and the version string alone does not give that away.
-API_LEVEL: int = 2
+API_LEVEL: int = 3
 
 RecordType = Literal["food", "weight", "workout"]
 
@@ -73,7 +74,8 @@ class FoodLogEdit(BaseModel):
     """Editable fields of a stored food log.
 
     Macros are optional as a group: without them the log is recomputed from the food
-    catalog, with them the typed numbers are stored as they are.
+    catalog. One of the four may be left out and is derived from the energy balance;
+    three typed numbers are therefore enough.
     """
 
     amount_g: float
@@ -103,20 +105,25 @@ class FoodLogEdit(BaseModel):
 
     @model_validator(mode="after")
     def validate_manual_macros(self) -> "FoodLogEdit":
-        """Require a complete, non-empty set of manual macros."""
-        macros = (self.calories, self.protein_usable, self.carbs, self.fats)
-        if any(value is None for value in macros) and any(value is not None for value in macros):
-            raise ValueError("Vyplň kalorie i všechna tři makra, nebo je nech přepočítat.")
-        if self.macros_provided and all(value == 0 for value in macros):
+        """Keep exactly one macro derivable, and never store an empty one."""
+        typed = [value for value in self.macros if value is not None]
+        if typed and len(typed) < 3:
+            raise ValueError("Zadej aspoň tři hodnoty ze čtyř, tu chybějící dopočítám.")
+        if len(typed) >= 3 and all(value == 0 for value in typed):
             raise ValueError("Ruční korekce nesmí vynulovat kalorie i všechna makra.")
-        if self.update_catalog and not self.macros_provided:
+        if self.update_catalog and not typed:
             raise ValueError("Do katalogu lze uložit jen ručně zadaná makra.")
         return self
 
     @property
+    def macros(self) -> tuple[float | None, float | None, float | None, float | None]:
+        """The four energy-carrying numbers of the payload."""
+        return (self.calories, self.protein_usable, self.carbs, self.fats)
+
+    @property
     def macros_provided(self) -> bool:
         """Report whether the payload carries manually typed macros."""
-        return self.calories is not None
+        return any(value is not None for value in self.macros)
 
 
 class WeightLogEdit(BaseModel):
@@ -309,15 +316,26 @@ def _update_food_record(conn, record_id: int, edit: FoodLogEdit) -> dict[str, ob
         )
 
     if edit.macros_provided:
+        try:
+            macros = complete_manual_macros(
+                edit.calories,
+                edit.protein_usable,
+                edit.carbs,
+                edit.fats,
+                alcohol=existing.alcohol,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
         updated = apply_manual_macros(
             existing,
             food_def,
             edit.amount_g,
             edit.state,
-            calories=edit.calories,
-            protein_usable=edit.protein_usable,
-            carbs=edit.carbs,
-            fats=edit.fats,
+            calories=macros.calories,
+            protein_usable=macros.protein_usable,
+            carbs=macros.carbs,
+            fats=macros.fats,
             alcohol=edit.alcohol,
         )
     else:

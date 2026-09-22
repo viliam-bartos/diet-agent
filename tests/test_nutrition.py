@@ -237,3 +237,65 @@ def test_per_100g_from_portion_converts_cooked_grams_to_raw_basis():
 
     with pytest.raises(ValueError, match="musí být kladné číslo"):
         per_100g_from_portion(100.0, 0.0, "raw", "Test")
+
+
+def test_complete_manual_macros_derives_the_missing_number():
+    """Any one of the four numbers follows from the other three through the balance."""
+    from nutrition_agent.nutrition import complete_manual_macros
+
+    # 4*20 + 4*10 + 9*20 = 300 kcal
+    kcal = complete_manual_macros(None, 20.0, 10.0, 20.0)
+    assert kcal.calories == 300.0
+
+    protein = complete_manual_macros(300.0, None, 10.0, 20.0)
+    assert protein.protein_usable == 20.0
+
+    carbs = complete_manual_macros(300.0, 20.0, None, 20.0)
+    assert carbs.carbs == 10.0
+
+    fats = complete_manual_macros(300.0, 20.0, 10.0, None)
+    assert fats.fats == 20.0
+
+    # Typed numbers are kept untouched, the derived one is the only addition.
+    assert (fats.protein_usable, fats.carbs) == (20.0, 10.0)
+
+
+def test_complete_manual_macros_passes_a_complete_set_through():
+    """Four typed numbers need no derivation."""
+    from nutrition_agent.nutrition import complete_manual_macros
+
+    result = complete_manual_macros(250.0, 30.0, 2.0, 14.0)
+    assert (result.calories, result.protein_usable, result.carbs, result.fats) == (
+        250.0,
+        30.0,
+        2.0,
+        14.0,
+    )
+
+
+def test_complete_manual_macros_counts_stored_alcohol():
+    """Ethanol energy is subtracted, so beer does not inflate the derived fat."""
+    from nutrition_agent.nutrition import complete_manual_macros
+
+    # 43 kcal with 4 g of ethanol: 2 kcal from protein + 14 from carbs + 28 from
+    # alcohol is more than the stated energy, so the fat would come out negative.
+    with pytest.raises(ValueError, match="záporné tuky"):
+        complete_manual_macros(43.0, 0.5, 3.5, None, alcohol=4.0)
+
+    # Without alcohol the same numbers leave 27 kcal of fat.
+    assert complete_manual_macros(43.0, 0.5, 3.5, None).fats == 3.0
+    assert complete_manual_macros(100.0, 0.5, 3.5, None, alcohol=4.0).fats == 6.22
+
+
+def test_complete_manual_macros_refuses_two_unknowns_and_negative_results():
+    """Underdetermined or contradictory input fails fast instead of guessing."""
+    from nutrition_agent.nutrition import complete_manual_macros
+
+    with pytest.raises(ValueError, match="aspoň tři"):
+        complete_manual_macros(300.0, 20.0, None, None)
+
+    with pytest.raises(ValueError, match="záporné tuky"):
+        complete_manual_macros(100.0, 20.0, 10.0, None)
+
+    with pytest.raises(ValueError, match="záporné sacharidy"):
+        complete_manual_macros(100.0, 20.0, None, 5.0)

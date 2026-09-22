@@ -515,13 +515,100 @@ def test_api_patch_food_catalog_correction_of_a_cooked_portion(edit_client, reco
         {"amount_g": 200.0, "protein_usable": 10.0},
         {"amount_g": 200.0, "calories": -1.0, "protein_usable": 1.0, "carbs": 1.0, "fats": 1.0},
         {"amount_g": 200.0, "calories": 0, "protein_usable": 0, "carbs": 0, "fats": 0},
+        {"amount_g": 200.0, "calories": 0, "protein_usable": 0, "carbs": 0},
         {"amount_g": 200.0, "update_catalog": True},
     ],
 )
 def test_api_patch_food_rejects_incomplete_manual_macros(edit_client, payload: dict):
-    """A partial or empty macro correction is refused instead of stored."""
+    """Fewer than three values or an empty correction is refused instead of stored."""
     client, ids = edit_client
 
     response = client.patch(f"/api/records/food/{ids['food']}", json=payload)
     assert response.status_code == 422
     assert "Neplatná hodnota pole" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "missing_key", "expected"),
+    [
+        ({"calories": 300.0, "protein_usable": 20.0, "carbs": 10.0}, "fats", 20.0),
+        ({"calories": 300.0, "protein_usable": 20.0, "fats": 20.0}, "carbs", 10.0),
+        ({"calories": 300.0, "carbs": 10.0, "fats": 20.0}, "protein_usable", 20.0),
+        ({"protein_usable": 20.0, "carbs": 10.0, "fats": 20.0}, "calories", 300.0),
+    ],
+)
+def test_api_patch_food_derives_the_missing_macro(
+    edit_client, payload: dict, missing_key: str, expected: float
+):
+    """Three typed values are enough; the fourth follows from the energy balance."""
+    client, ids = edit_client
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={"amount_g": 200.0, "state": "raw", **payload},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body[missing_key] == expected
+    assert body["nutrition_source"] == "manual"
+
+    # Everything typed is stored unchanged.
+    for key, value in payload.items():
+        assert body[key] == value
+
+    listed = client.get("/api/records", params={"type": "food"}).json()["items"][0]
+    assert listed[missing_key] == expected
+
+
+def test_api_patch_food_derives_fat_net_of_stored_alcohol(edit_client, record_db):
+    """A derived macro must not absorb the calories of stored ethanol."""
+    client, ids = edit_client
+    conn, _ = record_db
+    conn.execute("UPDATE food_logs SET alcohol = 4.0 WHERE id = ?", (ids["food"],))
+    conn.commit()
+
+    # 100 - 2 (protein) - 14 (carbs) - 28 (alcohol) = 56 kcal left for fat.
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={"amount_g": 200.0, "calories": 100.0, "protein_usable": 0.5, "carbs": 3.5},
+    )
+    assert response.status_code == 200
+    assert response.json()["fats"] == 6.22
+
+
+def test_api_patch_food_rejects_a_contradictory_correction(edit_client):
+    """Numbers that leave no room for the missing macro are refused with a reason."""
+    client, ids = edit_client
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={"amount_g": 200.0, "calories": 100.0, "protein_usable": 20.0, "carbs": 10.0},
+    )
+    assert response.status_code == 422
+    assert "záporné tuky" in response.json()["detail"]
+
+
+def test_api_patch_food_catalog_correction_uses_the_derived_value(edit_client, record_db):
+    """The catalog write-back stores the derived macro too."""
+    from nutrition_agent.repository import get_food
+
+    client, ids = edit_client
+    conn, _ = record_db
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={
+            "amount_g": 200.0,
+            "state": "raw",
+            "calories": 300.0,
+            "protein_usable": 20.0,
+            "carbs": 10.0,
+            "update_catalog": True,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["fats"] == 20.0
+
+    corrected = get_food(conn, "Kuřecí prsa")
+    assert corrected is not None
+    assert corrected.fats == 10.0  # 20 g per 200 g portion

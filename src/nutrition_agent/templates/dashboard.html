@@ -991,7 +991,7 @@
     // Must match API_LEVEL in web.py; tests/test_web_api.py keeps the two in step.
     // A process started before an API change serves this page from disk but answers
     // with the old code, and this number is what gives it away.
-    const PAGE_API_LEVEL = 2;
+    const PAGE_API_LEVEL = 3;
 
     const REQUIRED_DAY_FIELDS = [
       'calories', 'target_calories',
@@ -1397,8 +1397,9 @@
     let macrosDirty = false;
 
     const MACRO_HINT =
-      'Makra se přepočítají z katalogu, dokud je sám neupravíš; upravená se uloží přesně ' +
-      'tak, jak jsou v polích. Alkohol zůstává beze změny.';
+      'Nech prázdné právě jedno pole a dopočítám ho z ostatních (4 kcal/g bílkovin ' +
+      'i sacharidů, 9 kcal/g tuků). Upravená makra se uloží přesně tak, jak jsou ' +
+      'v polích; alkohol zůstává beze změny.';
 
     function buildEditFields(record) {
       if (record.type === 'food') {
@@ -1416,19 +1417,19 @@
           </div>
           <div class="field">
             <label for="editCalories">Kalorie (kcal)</label>
-            <input type="number" id="editCalories" step="0.1" min="0" value="${record.calories}">
+            <input type="number" id="editCalories" step="0.1" min="0" value="${record.calories}" placeholder="dopočítám">
           </div>
           <div class="field">
             <label for="editProtein">Bílkoviny DIAAS (g)</label>
-            <input type="number" id="editProtein" step="0.1" min="0" value="${record.protein_usable}">
+            <input type="number" id="editProtein" step="0.1" min="0" value="${record.protein_usable}" placeholder="dopočítám">
           </div>
           <div class="field">
             <label for="editCarbs">Sacharidy (g)</label>
-            <input type="number" id="editCarbs" step="0.1" min="0" value="${record.carbs}">
+            <input type="number" id="editCarbs" step="0.1" min="0" value="${record.carbs}" placeholder="dopočítám">
           </div>
           <div class="field">
             <label for="editFats">Tuky (g)</label>
-            <input type="number" id="editFats" step="0.1" min="0" value="${record.fats}">
+            <input type="number" id="editFats" step="0.1" min="0" value="${record.fats}" placeholder="dopočítám">
           </div>
           <div class="field-hint">${MACRO_HINT}</div>
           <label class="field-check">

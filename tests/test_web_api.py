@@ -250,6 +250,10 @@ def test_dashboard_food_dialog_offers_macro_fields(api_client: TestClient):
     assert "if (macrosDirty)" in body
     assert "nutrition_source === 'manual'" in body
 
+    # Leaving one field empty derives it from the other three, so the dialog says so.
+    assert 'placeholder="dopočítám"' in body
+    assert "Nech prázdné právě jedno pole" in body
+
 
 def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):
     """Descriptive subtitles were removed from the section headers."""

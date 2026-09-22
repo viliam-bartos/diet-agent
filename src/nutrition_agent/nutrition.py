@@ -3,11 +3,16 @@
 import logging
 import re
 import unicodedata
+from dataclasses import dataclass
 from enum import StrEnum
 
 from rapidfuzz import fuzz
 
 from nutrition_agent.models import (
+    KCAL_PER_G_ALCOHOL,
+    KCAL_PER_G_CARBS,
+    KCAL_PER_G_FAT,
+    KCAL_PER_G_PROTEIN,
     MAX_WEIGHT_KG,
     MIN_FOOD_MATCH_SCORE,
     MIN_WEIGHT_KG,
@@ -17,6 +22,7 @@ from nutrition_agent.models import (
     FoodDefinition,
     FoodNotFoundError,
     WeightValidationError,
+    energy_from_macros,
 )
 
 logger = logging.getLogger(__name__)
@@ -419,6 +425,91 @@ def recalculate_food_log(
             "nutrition_source": food_def.source,
         }
     )
+
+
+@dataclass(frozen=True)
+class ManualMacros:
+    """The four energy-carrying numbers of a manually corrected portion."""
+
+    calories: float
+    protein_usable: float
+    carbs: float
+    fats: float
+
+
+# Czech labels for the derivation errors, so the message names the field the user sees.
+MACRO_LABELS: dict[str, str] = {
+    "calories": "kalorie",
+    "protein_usable": "bílkoviny",
+    "carbs": "sacharidy",
+    "fats": "tuky",
+}
+
+
+def complete_manual_macros(
+    calories: float | None,
+    protein_usable: float | None,
+    carbs: float | None,
+    fats: float | None,
+    alcohol: float = 0.0,
+) -> ManualMacros:
+    """Fill in the one missing number from the energy balance.
+
+    Energy = 4*protein + 4*carbs + 9*fats + 7*alcohol, so any single one of the four
+    can be derived from the other three. Stored alcohol counts into the balance: a
+    portion of beer carries calories that its macros do not explain. Two missing
+    numbers have no unique solution, and a derived value below zero means the typed
+    numbers contradict each other, which is refused instead of stored.
+    """
+    values: dict[str, float | None] = {
+        "calories": calories,
+        "protein_usable": protein_usable,
+        "carbs": carbs,
+        "fats": fats,
+    }
+    missing = [name for name, value in values.items() if value is None]
+    if len(missing) > 1:
+        raise ValueError("Dopočítat lze právě jednu chybějící hodnotu; zadej aspoň tři ze čtyř.")
+
+    typed = {name: float(value) for name, value in values.items() if value is not None}
+    if not missing:
+        return ManualMacros(**typed)
+
+    unknown = missing[0]
+
+    if unknown == "calories":
+        typed["calories"] = round(
+            energy_from_macros(typed["protein_usable"], typed["carbs"], typed["fats"], alcohol),
+            1,
+        )
+        return ManualMacros(**typed)
+
+    remaining_kcal = typed["calories"] - alcohol * KCAL_PER_G_ALCOHOL
+    if unknown == "protein_usable":
+        derived = (
+            remaining_kcal - typed["carbs"] * KCAL_PER_G_CARBS - typed["fats"] * KCAL_PER_G_FAT
+        ) / KCAL_PER_G_PROTEIN
+    elif unknown == "carbs":
+        derived = (
+            remaining_kcal
+            - typed["protein_usable"] * KCAL_PER_G_PROTEIN
+            - typed["fats"] * KCAL_PER_G_FAT
+        ) / KCAL_PER_G_CARBS
+    else:
+        derived = (
+            remaining_kcal
+            - typed["protein_usable"] * KCAL_PER_G_PROTEIN
+            - typed["carbs"] * KCAL_PER_G_CARBS
+        ) / KCAL_PER_G_FAT
+
+    if derived < 0:
+        raise ValueError(
+            f"Ze zadaných hodnot vychází záporné {MACRO_LABELS[unknown]} ({derived:.2f}). "
+            "Zkontroluj prosím kalorie a makra."
+        )
+
+    typed[unknown] = round(derived, 2)
+    return ManualMacros(**typed)
 
 
 def apply_manual_macros(
