@@ -80,6 +80,40 @@ Model Google Gemini Flash (přes oficiální SDK `google-genai`) slouží výhra
 
 ---
 
+## Provoz v Dockeru (Linux, macOS)
+
+Pro stroj, který běží pořád — třeba MacBook s Linux Mint — je nejjednodušší varianta kontejner s `restart: unless-stopped`. Web i bot v něm běží v jednom procesu, takže se dvě instance neperou o SQLite soubor.
+
+```bash
+git clone https://github.com/viliam-bartos/diet-agent.git
+cd diet-agent
+cp .env.example .env      # doplň GEMINI_API_KEY, DISCORD_BOT_TOKEN a DISCORD_GUILD_ID
+docker compose up -d --build
+docker compose logs -f
+```
+
+Dashboard je na `http://127.0.0.1:8000`, bot se připojí sám. Příkazy pro správu:
+
+| Příkaz | Význam |
+| :--- | :--- |
+| `docker compose logs -f` | Sledovat výstup bota i webu. |
+| `docker compose restart` | Restartovat po změně `.env`. |
+| `docker compose down` | Zastavit a odstranit kontejner (data zůstávají). |
+| `docker compose up -d --build` | Nasadit novou verzi po `git pull`. |
+
+Co je potřeba vědět:
+
+- **Data zůstávají na hostu.** Svazek `./data:/app/data` drží databázi, kurátorovaný katalog i naučené převody. Rebuild ani výměna kontejneru o ně nic nepřipraví; zálohu uděláš zkopírováním `data/nutrition.db` a `data/foods.json`.
+- **Migrace ze starého stroje.** Zkopíruj `data/nutrition.db` a `data/foods.json` do `./data` na novém stroji ještě před prvním spuštěním.
+- **Zóna.** SQLite počítá hranici dne podle místního času, proto kontejner dostává `TZ` (výchozí `Europe/Prague`). Když bys byl v jiné zóně, nastav `TZ` v prostředí před `docker compose up`.
+- **Práva k souborům.** Kontejner běží jako uživatel s uid 1000, což na Linux Mintu odpovídá prvnímu uživateli. Když `id -u` vrátí jiné číslo, spusť `PUID=$(id -u) PGID=$(id -g) docker compose up -d --build`. Složka `data/` musí na hostu existovat a patřit tobě — jinak ji Docker založí jako root a zápis do databáze spadne.
+- **Port je jen na localhostu.** Dashboard nemá přihlašování. Když ho chceš vystavit na LAN, přepiš v `docker-compose.yml` mapování na `"8000:8000"` a počítej s tím, že kdokoli na síti může záznamy číst i měnit.
+- **Jen bot bez webu.** Stačí v `docker-compose.yml` nahradit `command` za `["nutrition-agent", "--bot"]`. Healthcheck na dashboard pak hlásí `unhealthy`, takže ho zároveň vypni.
+
+Kontejner staví na `python:3.12-slim`, instaluje závislosti z `pyproject.toml` a běží pod běžným uživatelem. Ověření, že obraz funguje, dělá healthcheck na `/api/version`.
+
+---
+
 ## Rychlý start na Windows
 
 Po instalaci stačí dvojkliknout na **`start.bat`** v kořeni projektu. Skript:

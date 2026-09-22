@@ -1,0 +1,35 @@
+services:
+  nutrition-agent:
+    build:
+      context: .
+      args:
+        # Must match the owner of ./data on the host (Linux Mint: usually 1000, `id -u`).
+        PUID: ${PUID:-1000}
+        PGID: ${PGID:-1000}
+    image: nutrition-agent:latest
+    container_name: nutrition-agent
+    # Comes back after a crash or a reboot without anyone logging in.
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      # Inside the container the dashboard has to listen on every interface, otherwise the
+      # published port would reach nothing.
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "8000"
+      # SQLite decides the day boundary with local time, so the zone has to be yours.
+      TZ: ${TZ:-Europe/Prague}
+    ports:
+      # Localhost only: the dashboard has no authentication. Use "8000:8000" to expose it
+      # on the LAN, knowing anyone on the network can then read and edit your records.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Database, curated catalog and learned conversions live on the host, so rebuilding
+      # or replacing the container never loses data.
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
