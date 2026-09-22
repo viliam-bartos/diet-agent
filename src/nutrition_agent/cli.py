@@ -62,6 +62,8 @@ from nutrition_agent.targets import (
 
 logger = logging.getLogger(__name__)
 
+_CORRECTION_USAGE = "Použití: jidlo <nazev> [<kcal> <bilkoviny> <sacharidy> <tuky> [<alkohol>]]"
+
 
 def format_day_counts(counts: dict[str, int]) -> str:
     """Format per-type record counts as a bullet list."""
@@ -108,12 +110,17 @@ def resolve_grams(
     food_def: FoodDefinition,
     amount: float,
     unit: str,
+    state: str = "raw",
 ) -> tuple[float, bool]:
     """Resolve an amount and unit into grams, asking the model as a last resort.
 
     Order: absolute units, the curated tables, conversions the user or the model
     already stored, and only then a fresh estimate. Returns the grams and whether
     the conversion had to be estimated.
+
+    ``state`` is passed to the estimate because a portion of cooked rice weighs
+    roughly 2.5x a portion of dry rice; without it the cooked/raw ratio would
+    discount the weight a second time.
     """
     known = convert_to_grams(food_def.name, amount, unit)
     if known is not None:
@@ -126,7 +133,7 @@ def resolve_grams(
 
     logger.info("Neznámý převod '%s' u '%s', žádám model.", unit, food_def.name)
     try:
-        estimate = estimate_unit_conversion(food_def.name, unit)
+        estimate = estimate_unit_conversion(food_def.name, unit, state=state)
     except (ValueError, RuntimeError) as exc:
         raise ValueError(
             f"Nevím, kolik gramů je 1 {unit} u potraviny '{food_def.name}' ({exc}). "
@@ -146,14 +153,16 @@ def resolve_grams(
 def correct_food_nutrition(conn: sqlite3.Connection, argument: str) -> str:
     """Show or overwrite the nutrition values of a catalog food.
 
-    Usage: 'jidlo <nazev>' to inspect, 'jidlo <nazev> <kcal> <B> <S> <T>' to overwrite.
+    Usage: 'jidlo <nazev>' to inspect, 'jidlo <nazev> <kcal> <B> <S> <T> [<alkohol>]' to
+    overwrite. Alcohol is optional; when omitted the stored value is kept, so a
+    correction of a beer does not silently drop its ethanol calories.
     """
     tokens = argument.split()
     if not tokens:
-        return "Použití: jidlo <nazev> [<kcal> <bilkoviny> <sacharidy> <tuky>]"
+        return _CORRECTION_USAGE
 
     numbers: list[float] = []
-    while tokens and len(numbers) < 4:
+    while tokens and len(numbers) < 5:
         try:
             numbers.insert(0, float(tokens[-1].replace(",", ".")))
         except ValueError:
@@ -162,7 +171,7 @@ def correct_food_nutrition(conn: sqlite3.Connection, argument: str) -> str:
 
     name = " ".join(tokens).strip()
     if not name:
-        return "Chybí název potraviny. Použití: jidlo <nazev> [<kcal> <B> <S> <T>]"
+        return "Chybí název potraviny. " + _CORRECTION_USAGE
 
     existing = get_food(conn, name)
     if existing is None:
@@ -173,35 +182,43 @@ def correct_food_nutrition(conn: sqlite3.Connection, argument: str) -> str:
 
     if not numbers:
         source = "AI odhad" if existing.source == "ai" else "kurátorovaný katalog"
-        return (
-            f"{existing.name} ({source}), hodnoty na 100 g:\n"
-            f"- Energie: {existing.calories:.1f} kcal\n"
-            f"- Bílkoviny: {existing.protein:.2f} g\n"
-            f"- Sacharidy: {existing.carbs:.2f} g\n"
-            f"- Tuky: {existing.fats:.2f} g\n"
-            f"- DIAAS koeficient: {existing.diaas_coefficient:.2f}\n"
-            f"Oprava: jidlo {existing.name} <kcal> <bilkoviny> <sacharidy> <tuky>"
+        lines = [
+            f"{existing.name} ({source}), hodnoty na 100 g:",
+            f"- Energie: {existing.calories:.1f} kcal",
+            f"- Bílkoviny: {existing.protein:.2f} g",
+            f"- Sacharidy: {existing.carbs:.2f} g",
+            f"- Tuky: {existing.fats:.2f} g",
+        ]
+        if existing.alcohol > 0:
+            lines.append(f"- Alkohol: {existing.alcohol:.2f} g ({existing.alcohol * 7:.0f} kcal)")
+        lines.append(f"- DIAAS koeficient: {existing.diaas_coefficient:.2f}")
+        lines.append(
+            f"Oprava: jidlo {existing.name} <kcal> <bilkoviny> <sacharidy> <tuky> [<alkohol>]"
         )
+        return "\n".join(lines)
 
-    if len(numbers) != 4:
-        return (
-            "Pro opravu zadej všechny čtyři hodnoty: "
-            f"jidlo {existing.name} <kcal> <bilkoviny> <sacharidy> <tuky>"
-        )
+    if len(numbers) not in (4, 5):
+        base = f"jidlo {existing.name} <kcal> <bilkoviny> <sacharidy> <tuky> [<alkohol>]"
+        return f"Pro opravu zadej čtyři nebo pět hodnot: {base}"
 
-    calories, protein, carbs, fats = numbers
     if min(numbers) < 0:
         return "Hodnoty nesmí být záporné."
 
-    updated = update_food_nutrition(conn, existing.name, calories, protein, carbs, fats)
-    return (
-        f"Opraveno: {updated.name} na 100 g:\n"
-        f"- Energie: {updated.calories:.1f} kcal\n"
-        f"- Bílkoviny: {updated.protein:.2f} g\n"
-        f"- Sacharidy: {updated.carbs:.2f} g\n"
-        f"- Tuky: {updated.fats:.2f} g\n"
-        "Už zaznamenané dny se nepřepočítávají."
-    )
+    calories, protein, carbs, fats = numbers[:4]
+    alcohol = numbers[4] if len(numbers) == 5 else existing.alcohol
+
+    updated = update_food_nutrition(conn, existing.name, calories, protein, carbs, fats, alcohol)
+    lines = [
+        f"Opraveno: {updated.name} na 100 g:",
+        f"- Energie: {updated.calories:.1f} kcal",
+        f"- Bílkoviny: {updated.protein:.2f} g",
+        f"- Sacharidy: {updated.carbs:.2f} g",
+        f"- Tuky: {updated.fats:.2f} g",
+    ]
+    if updated.alcohol > 0:
+        lines.append(f"- Alkohol: {updated.alcohol:.2f} g ({updated.alcohol * 7:.0f} kcal)")
+    lines.append("Už zaznamenané dny se nepřepočítávají.")
+    return "\n".join(lines)
 
 
 def list_catalog_entries(conn: sqlite3.Connection, argument: str) -> str:
@@ -490,7 +507,7 @@ def handle_user_message(
             try:
                 food_def, was_learned = resolve_food(conn, item.name, foods)
                 amount_g, conversion_estimated = resolve_grams(
-                    conn, food_def, item.amount, item.unit
+                    conn, food_def, item.amount, item.unit, state=item.state
                 )
             except FoodNotFoundError as exc:
                 return f"Chyba: {exc}"
@@ -527,11 +544,12 @@ def handle_user_message(
             ai_flag = " [AI odhad maker]" if item.nutrition_source == "ai" else ""
             conv_flag = " [odhad převodu]" if item.conversion_estimated else ""
             state_flag = f" ({item.state})" if item.state == "cooked" else ""
+            alcohol_flag = f" | Alkohol: {item.alcohol:.1f} g" if item.alcohol > 0 else ""
             lines.append(
                 f"- {item.food_name_matched} ({item.amount_g:.0f} g{state_flag}{est_flag}): "
                 f"{item.calories:.1f} kcal | Bílkoviny: {item.protein_usable:.1f} g DIAAS "
                 f"(celkem {item.protein_raw:.1f} g) | Sacharidy: {item.carbs:.1f} g | "
-                f"Tuky: {item.fats:.1f} g{ai_flag}{conv_flag}"
+                f"Tuky: {item.fats:.1f} g{alcohol_flag}{ai_flag}{conv_flag}"
             )
 
         if learned_names:

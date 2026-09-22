@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS food_logs (
     protein_usable REAL NOT NULL,
     carbs REAL NOT NULL,
     fats REAL NOT NULL,
+    alcohol REAL NOT NULL DEFAULT 0,
     nutrition_source TEXT NOT NULL DEFAULT 'curated',
     conversion_estimated INTEGER NOT NULL DEFAULT 0
 );
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS foods (
     diaas_coefficient REAL NOT NULL,
     carbs REAL NOT NULL,
     fats REAL NOT NULL,
+    alcohol REAL NOT NULL DEFAULT 0,
     source TEXT NOT NULL CHECK (source IN ('curated', 'ai')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -88,6 +90,7 @@ CREATE TABLE IF NOT EXISTS foods (
     diaas_coefficient REAL NOT NULL,
     carbs REAL NOT NULL,
     fats REAL NOT NULL,
+    alcohol REAL NOT NULL DEFAULT 0,
     source TEXT NOT NULL CHECK (source IN ('curated', 'ai')),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -100,6 +103,8 @@ CREATE INDEX IF NOT EXISTS idx_foods_source ON foods(source);
 COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("food_logs", "nutrition_source", "TEXT NOT NULL DEFAULT 'curated'"),
     ("food_logs", "conversion_estimated", "INTEGER NOT NULL DEFAULT 0"),
+    ("food_logs", "alcohol", "REAL NOT NULL DEFAULT 0"),
+    ("foods", "alcohol", "REAL NOT NULL DEFAULT 0"),
 )
 
 

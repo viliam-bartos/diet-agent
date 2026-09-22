@@ -323,10 +323,46 @@ prevod svíčková porce 350                # ruční oprava na 350 g za porci
 
 Dřív kód u neznámé kusové potraviny tiše počítal 100 g a u porce 150 g. To vypadalo jako měření, ale byl to vymyšlený údaj — teď se místo toho počká na odhad nebo na tebe.
 
+### Odhad množství bez váhy
+
+Když neuvedeš gramy, agent si množství odhadne sám. Nikdy kvůli tomu záznam neodmítne:
+
+```
+měl jsem rýži                     ->  1 porce vařené rýže (220 g)
+měl jsem chicken butter           ->  1 porce (350 g)
+dal jsem si pivo                  ->  500 ml
+vypil jsem dvě piva               ->  1000 ml
+panák rumu                        ->  40 ml
+měl jsem hrst ořechů              ->  1 ks (odhad váhy kusu)
+```
+
+U nápojů se odhaduje objem v mililitrech, protože teprve ten se dá přepočítat na kalorie. U hotových jídel porce, u syrových surovin také porce.
+
+Do odhadu hmotnosti jednotky jde i **stav potraviny**, protože porce suché rýže je kolem 80 g, kdežto porce vařené kolem 220 g. Bez toho by se úsušek uplatnil dvakrát a vyšlo by z toho třetinové číslo.
+
+### Alkohol
+
+Etanol má 7 kcal/g a **není to makroživina**, takže se ukládá zvlášť ve sloupci `alcohol`. Bez toho by pivo nešlo zapsat: jeho energie pochází z alkoholu, ne ze sacharidů, a kontrola konzistence by odhad odmítla jako nesmyslný.
+
+```
+dal jsem si pivo      ->  pivo (500 g): 215.0 kcal | ... | Alkohol: 19.0 g [AI odhad maker]
+vypil jsem dvě piva   ->  pivo (1000 g): 430.0 kcal | ... | Alkohol: 38.0 g
+```
+
+Energetická bilance se počítá jako `bílkoviny*4 + sacharidy*4 + tuky*9 + alkohol*7` a platí pro odhad stejně jako pro ruční opravu.
+
+Ruční oprava umí alkohol nastavit jako pátou hodnotu. Když ji vynecháš, uložená hodnota zůstane — aby oprava piva omylem nesmazala jeho alkoholové kalorie:
+
+```
+jidlo pivo                       # zobrazí i alkohol, pokud nějaký je
+jidlo pivo 44 0.5 3.6 0          # alkohol zůstane
+jidlo pivo 44 0.5 3.6 0 4.4      # alkohol se přepíše na 4.4 g
+```
+
 ### Co model neumí
 
 - **DIAAS koeficient** se neodhaduje volně. Model vybere jednu z pěti kategorií bílkovin (`animal`, `plant_isolate`, `legumes`, `grains_seeds`, `nuts_peanuts`) a koeficient se dopočítá lokálně. Když si není jistý, použije se konzervativní `0.70`.
-- **Nekonzistentní odhad se odmítne.** Pokud makra neodpovídají uvedené energii (odchylka nad 35 %), hodnoty se neuloží.
+- **Nekonzistentní odhad se odmítne.** Pokud makra a alkohol neodpovídají uvedené energii (odchylka nad 35 %), hodnoty se neuloží.
 - **Neznámou potravinu model přizná.** Když vrátí samé nuly, záznam se odmítne s chybou místo vymyšlených čísel.
 
 Tyto hodnoty jsou odhad, ne měření. Přesnost je u základních surovin vysoká, u složených jídel klidně ±30 %.

@@ -18,18 +18,28 @@ Tvým jediným úkolem je extrahovat entity a vrátit je v JSON podle schématu 
 Pravidla chování:
 1. Zákaz kalkulací: Nikdy neprováděj výpočty ani nedohledávej kalorie a makroživiny.
 2. Čistá extrakce: Z textu extrahuj suroviny, množství, jednotku, stav a odhad.
-3. Ošetření chybějícího množství:
-   - Kusové potraviny (např. 'jablko', 'banán', '2 vejce'):
-     pokud není uvedeno číslo, nastav amount: 1, unit: 'ks', is_estimated: True.
-   - Vážené / nespočitatelné suroviny (např. 'rýže', 'kuřecí'):
-     pokud chybí množství nebo porce, nastav log_type: 'INVALID' a
-     error_reason: 'Nespecifikované množství suroviny'.
-   - Běžná hotová jídla na porce (např. 'svíčková'):
-     nastav amount: 1, unit: 'porce', is_estimated: True, state: 'cooked'.
+3. Chybějící množství se ODHADUJE, nikdy kvůli němu nevracej 'INVALID':
+   - Uvedl-li uživatel číslo, použij přesně je a nastav is_estimated=False.
+   - Neuvedl-li číslo, zvol typickou jednotku a počet a nastav is_estimated=True:
+     - Kusové potraviny ('jablko', 'banán', '2 vejce') -> amount: 1, unit: 'ks'.
+     - Hotová jídla a restaurační porce ('svíčková', 'guláš s knedlíkem', 'butter chicken')
+       -> amount: 1, unit: 'porce', state: 'cooked'.
+     - Suroviny, u kterých uživatel míru vynechal ('rýže', 'kuřecí', 'těstoviny')
+       -> amount: 1, unit: 'porce', state: 'cooked'.
+     - Nápoje vyjadřuj vždy v mililitrech, nikdy v kusech, a počet vynásob:
+       pivo -> 500 ml za jedno; víno -> 200 ml; panák destilátu -> 40 ml;
+       káva nebo čaj -> 200 ml; limonáda -> 330 ml.
+       'dal jsem si pivo' -> amount: 500, unit: 'ml'
+       'vypil jsem dvě piva' -> amount: 1000, unit: 'ml'
+       'dvě kávy' -> amount: 400, unit: 'ml'
+     - Míry, které nejsou v seznamu jednotek ('hrst', 'sáček', 'kelímek', 'kopeček'),
+       namapuj na 'ks', jde-li o jednu porci, jinak na 'porce'.
+   Nikdy neurčuj gramy sám, jen zvol jednotku a počet. Hmotnost dopočítá lokální kód.
 4. Stav úpravy: U hotových jídel nastavuj state='cooked'. U masa pouze jedlá část bez kostí.
-5. Příznak odhadu (is_estimated): Nastav is_estimated=True, pokud gramáž nebyla v textu
-   uvedena číslem. Pokud uživatel zadal přesné číslo (např. '150g rýže'), nastav is_estimated=False.
+5. Příznak odhadu (is_estimated): Nastav is_estimated=True, pokud množství nebylo v textu
+   uvedeno číslem. Pokud uživatel zadal přesné číslo (např. '150g rýže'), nastav is_estimated=False.
 6. Normalizace: Názvy potravin normalizuj do základního tvaru v češtině v jednotném čísle.
+   Názvy cizích jídel ponech v originále nebo je přelož ('chicken butter' -> 'butter chicken').
 7. Jednotky: Zachovej míru, kterou uživatel skutečně použil. Neměň ji na 'ks' ani na gramy.
    - 'g' nebo 'ml' pro vážené a tekuté suroviny ('150g rýže', '200ml mléka').
    - 'odměrka' pro odměrky ('2 odměrky proteinu' -> amount: 2, unit: 'odměrka').
@@ -42,8 +52,8 @@ Pravidla chování:
    - Pokud uživatel hlásí tělesnou váhu (např. 'Váha 83 kg', 'Vážím 82.5', 'Dnes 84.1kg'):
      nastav log_type: 'WEIGHT' a do pole weight_kg vlož numerickou hodnotu váhy v kg jako float.
      Pole items MUSÍ být prázdný seznam [].
-9. Neplatné vstupy: Pokud je vstup nesrozumitelný nebo chybí množství u vážené suroviny,
-   nastav log_type: 'INVALID' a do error_reason uveď důvod.
+9. Neplatné vstupy: 'INVALID' použij POUZE když vstup neobsahuje jídlo ani váhu, nebo je
+   nesrozumitelný (např. 'ahoj', 'asdfgh'). Nikdy kvůli chybějícímu množství.
 10. Formát výstupu: Zákaz jakéhokoliv doplňkového textu mimo validní JSON schématu.
 
 Příklady očekávaných JSON výstupů:
@@ -66,7 +76,21 @@ Výstup: {"log_type": "FOOD", "items": [
   {"name": "šunka", "amount": 2.0, "unit": "plátek"}]}
 
 Vstup: "Měl jsem rýži"
-Výstup: {"log_type": "INVALID", "error_reason": "Nespecifikované množství suroviny"}
+Výstup: {"log_type": "FOOD", "items": [{"name": "rýže", "amount": 1.0,
+  "unit": "porce", "state": "cooked"}]}
+
+Vstup: "Měl jsem chicken butter v indické restauraci, k tomu porci rýže a placku"
+Výstup: {"log_type": "FOOD", "items": [
+  {"name": "butter chicken", "amount": 1.0, "unit": "porce", "state": "cooked"},
+  {"name": "rýže", "amount": 1.0, "unit": "porce", "state": "cooked"},
+  {"name": "indická placka", "amount": 1.0, "unit": "ks", "state": "cooked"}]}
+
+Vstup: "ahoj jak se máš"
+Výstup: {"log_type": "INVALID", "error_reason": "Vstup neobsahuje jídlo ani váhu"}
+
+Vstup: "dal jsem si pivo"
+Výstup: {"log_type": "FOOD", "items": [{"name": "pivo", "amount": 500.0,
+  "unit": "ml", "state": "raw"}]}
 """
 
 
@@ -169,18 +193,32 @@ Pravidla:
    - 'grains_seeds': obiloviny, rýže, těstoviny, chléb, semena
    - 'nuts_peanuts': ořechy a arašídy
    - 'unknown': pokud si kategorií nejsi jistý
-5. Energetická bilance musí odpovídat: kcal ≈ bílkoviny*4 + sacharidy*4 + tuky*9.
-6. Pokud potravinu neznáš nebo je nesmyslná, vrať nuly a protein_category 'unknown'.
-7. Zákaz jakéhokoliv textu mimo JSON.
+5. Alkohol: u piva, vína, destilátů a míchaných nápojů vyplň 'alcohol' čistým etanolem
+   v gramech na 100 ml nebo 100 g. Etanol má 7 kcal/g a do makroživin nepatří.
+   Přibližně: 4 % obj. = 3,2 g/100 ml, 5 % = 4 g, 12 % = 9,6 g, 40 % = 32 g.
+   U nealkoholických potravin nech 0.
+6. Energetická bilance musí odpovídat:
+   kcal ≈ bílkoviny*4 + sacharidy*4 + tuky*9 + alkohol*7.
+   U piva tak energie pochází hlavně z alkoholu, ne ze sacharidů.
+7. Pokud potravinu neznáš nebo je nesmyslná, vrať nuly a protein_category 'unknown'.
+8. Zákaz jakéhokoliv textu mimo JSON.
 
 Příklady:
 Vstup: "kuřecí kari"
 Výstup: {"name": "kuřecí kari", "calories": 130, "protein": 12, "carbs": 6, "fats": 6,
-         "protein_category": "animal"}
+         "alcohol": 0, "protein_category": "animal"}
 
 Vstup: "quinoa"
 Výstup: {"name": "quinoa", "calories": 368, "protein": 14, "carbs": 64, "fats": 6,
-         "protein_category": "grains_seeds"}
+         "alcohol": 0, "protein_category": "grains_seeds"}
+
+Vstup: "ležák 12°"
+Výstup: {"name": "ležák 12°", "calories": 43, "protein": 0.5, "carbs": 3.5, "fats": 0,
+         "alcohol": 4.0, "protein_category": "grains_seeds"}
+
+Vstup: "víno bílé"
+Výstup: {"name": "víno bílé", "calories": 82, "protein": 0.1, "carbs": 2.6, "fats": 0,
+         "alcohol": 9.6, "protein_category": "unknown"}
 """
 
 
@@ -224,40 +262,54 @@ def estimate_food_nutrition(
 
 
 UNIT_CONVERSION_INSTRUCTION = """Jsi převodník kuchyňských měr na gramy.
-Dostaneš potravinu a jednotku, kterou uživatel použil. Odpověz, kolik gramů odpovídá
-jedné takové jednotce u této konkrétní potraviny.
+Dostaneš potravinu, jednotku a stav, ve kterém ji uživatel snědl. Odpověz, kolik gramů
+odpovídá jedné jednotce TAK, JAK JI UŽIVATEL SNĚDL.
 
 Pravidla:
 1. Vrátíš pouze JSON podle schématu EstimatedUnitConversion.
 2. Počítej jednu jednotku, ne množství, které uživatel zadal.
-3. Vycházej z reálné hmotnosti dané potraviny:
-   - 'odměrka' proteinu je obvykle 30 g, ale u konkrétního produktu se může lišit.
-   - 'porce' hotového jídla je obvykle 250-400 g podle druhu jídla.
-   - 'plátek' šunky je obvykle 15-25 g, 'krajíc' chleba 35-50 g.
+3. Hmotnost uváděj v podobě, v jaké se jídlo jí, ne v surovině. Na stavu záleží:
+   - state='cooked' znamená hotové jídlo na talíři. U rýže, těstovin a luštěnin uváděj
+     hmotnost VAŘENÝCH, u masa hmotnost UPEČENÉHO. Vařená rýže má zhruba 2,5x vyšší
+     hmotnost než suchá, vařené těstoviny zhruba 2,3x.
+   - state='raw' znamená syrovou nebo suchou surovinu.
+   Nikdy nemíchej obojí: 'porce' vařené rýže není totéž co 'porce' suché rýže.
+4. Typické hodnoty:
+   - 'odměrka' proteinu je obvykle 30 g, u konkrétního produktu se může lišit.
+   - 'porce' hotového jídla v restauraci je obvykle 250-400 g.
+   - 'porce' vařené přílohy (rýže, těstoviny, brambory) je obvykle 200-250 g.
+   - 'plátek' šunky 15-25 g, 'krajíc' chleba 35-50 g, 'ks' placky 80-120 g.
    - 'hrnek' je obvykle 200-250 g podle potraviny.
-   - 'ks' je hmotnost jednoho kusu dané potraviny (např. 1 banán 120 g).
-4. Uveď hodnotu v gramech jako číslo. Nepoužívej rozsahy ani text.
-5. Pokud jednotku u dané potraviny neznáš, vrať 0.
+5. Uveď hodnotu v gramech jako číslo. Nepoužívej rozsahy ani text.
+6. Pokud jednotku u dané potraviny neznáš, vrať 0.
 
 Příklady:
-Vstup: "syrovátkový protein", "odměrka"
+Vstup: "syrovátkový protein | odměrka | raw"
 Výstup: {"name": "syrovátkový protein", "unit": "odměrka", "grams_per_unit": 30}
 
-Vstup: "svíčková na smetaně", "porce"
-Výstup: {"name": "svíčková na smetaně", "unit": "porce", "grams_per_unit": 350}
+Vstup: "Rýže jasmínová (suchá) | porce | cooked"
+Výstup: {"name": "Rýže jasmínová (suchá)", "unit": "porce", "grams_per_unit": 220}
 
-Vstup: "šunka vepřová výběrová", "plátek"
-Výstup: {"name": "šunka vepřová výběrová", "unit": "plátek", "grams_per_unit": 20}
+Vstup: "Rýže jasmínová (suchá) | porce | raw"
+Výstup: {"name": "Rýže jasmínová (suchá)", "unit": "porce", "grams_per_unit": 80}
+
+Vstup: "svíčková na smetaně | porce | cooked"
+Výstup: {"name": "svíčková na smetaně", "unit": "porce", "grams_per_unit": 350}
 """
 
 
 def estimate_unit_conversion(
     food_name: str,
     unit: str,
+    state: str = "raw",
     client: genai.Client | None = None,
     model: str = "gemini-3.6-flash",
 ) -> EstimatedUnitConversion:
-    """Ask the model how many grams one unit of a food weighs.
+    """Ask the model how many grams one unit of a food weighs as it was eaten.
+
+    ``state`` matters: a portion of dry rice is about 80 g while a portion of cooked
+    rice is about 220 g. Without it the model answers about the raw catalog form and
+    the cooked/raw ratio then discounts the weight a second time.
 
     The result is an estimate and a suggestion only; callers must store it with an
     'ai' source and keep it visible and correctable. An unknown unit must come back
@@ -265,6 +317,7 @@ def estimate_unit_conversion(
     """
     clean_name = food_name.strip()
     clean_unit = unit.strip().lower()
+    clean_state = state.strip().lower() or "raw"
     if not clean_name:
         raise ValueError("Nelze odhadnout převod pro prázdný název potraviny.")
     if not clean_unit:
@@ -282,7 +335,7 @@ def estimate_unit_conversion(
 
     response = active_client.models.generate_content(
         model=model,
-        contents=f"{clean_name} | {clean_unit}",
+        contents=f"{clean_name} | {clean_unit} | {clean_state}",
         config=config,
     )
 

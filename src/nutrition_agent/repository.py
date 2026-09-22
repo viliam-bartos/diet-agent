@@ -31,7 +31,7 @@ def load_foods_from_json(file_path: str | Path = "data/foods.json") -> list[Food
     return [FoodDefinition.model_validate(item) for item in data]
 
 
-FOOD_COLUMNS = "name, calories, protein, diaas_coefficient, carbs, fats, source"
+FOOD_COLUMNS = "name, calories, protein, diaas_coefficient, carbs, fats, alcohol, source"
 
 
 def _row_to_food(row: sqlite3.Row) -> FoodDefinition:
@@ -43,6 +43,7 @@ def _row_to_food(row: sqlite3.Row) -> FoodDefinition:
         diaas_coefficient=row["diaas_coefficient"],
         carbs=row["carbs"],
         fats=row["fats"],
+        alcohol=row["alcohol"],
         source=row["source"],
     )
 
@@ -61,9 +62,9 @@ def ensure_food_catalog(conn: sqlite3.Connection, json_path: str | Path) -> int:
         cursor.execute(
             """
             INSERT INTO foods
-                (name, name_key, calories, protein, diaas_coefficient, carbs, fats,
+                (name, name_key, calories, protein, diaas_coefficient, carbs, fats, alcohol,
                  source, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'curated', ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'curated', ?, ?)
             ON CONFLICT(name_key) DO NOTHING
             """,
             (
@@ -74,6 +75,7 @@ def ensure_food_catalog(conn: sqlite3.Connection, json_path: str | Path) -> int:
                 food.diaas_coefficient,
                 food.carbs,
                 food.fats,
+                food.alcohol,
                 now,
                 now,
             ),
@@ -121,9 +123,9 @@ def save_learned_food(conn: sqlite3.Connection, food: FoodDefinition) -> bool:
     cursor.execute(
         """
         INSERT INTO foods
-            (name, name_key, calories, protein, diaas_coefficient, carbs, fats,
+            (name, name_key, calories, protein, diaas_coefficient, carbs, fats, alcohol,
              source, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'ai', ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ai', ?, ?)
         ON CONFLICT(name_key) DO NOTHING
         """,
         (
@@ -134,6 +136,7 @@ def save_learned_food(conn: sqlite3.Connection, food: FoodDefinition) -> bool:
             food.diaas_coefficient,
             food.carbs,
             food.fats,
+            food.alcohol,
             now,
             now,
         ),
@@ -149,6 +152,7 @@ def update_food_nutrition(
     protein: float,
     carbs: float,
     fats: float,
+    alcohol: float = 0.0,
 ) -> FoodDefinition:
     """Overwrite the nutrition values of an existing food (manual correction)."""
     existing = get_food(conn, name)
@@ -158,10 +162,18 @@ def update_food_nutrition(
     conn.execute(
         """
         UPDATE foods
-        SET calories = ?, protein = ?, carbs = ?, fats = ?, updated_at = ?
+        SET calories = ?, protein = ?, carbs = ?, fats = ?, alcohol = ?, updated_at = ?
         WHERE name_key = ?
         """,
-        (calories, protein, carbs, fats, utc_now_iso(), food_name_key(existing.name)),
+        (
+            calories,
+            protein,
+            carbs,
+            fats,
+            alcohol,
+            utc_now_iso(),
+            food_name_key(existing.name),
+        ),
     )
     conn.commit()
 
@@ -287,9 +299,9 @@ def save_food_logs(
     sql = """
     INSERT INTO food_logs (
         logged_at, raw_input, food_name_matched, amount_g,
-        state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+        state, is_estimated, calories, protein_raw, protein_usable, carbs, fats, alcohol,
         nutrition_source, conversion_estimated
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     saved_logs: list[CalculatedFoodLog] = []
     cursor = conn.cursor()
@@ -308,6 +320,7 @@ def save_food_logs(
                 log.protein_usable,
                 log.carbs,
                 log.fats,
+                log.alcohol,
                 log.nutrition_source,
                 1 if log.conversion_estimated else 0,
             ),
@@ -347,6 +360,7 @@ def _row_to_food_log(row: sqlite3.Row) -> CalculatedFoodLog:
         protein_usable=row["protein_usable"],
         carbs=row["carbs"],
         fats=row["fats"],
+        alcohol=row["alcohol"],
         nutrition_source=row["nutrition_source"],
         conversion_estimated=bool(row["conversion_estimated"]),
     )
@@ -359,7 +373,7 @@ def get_recent_food_logs(
     """Fetch recent food logs ordered descending by timestamp."""
     sql = """
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats, alcohol,
            nutrition_source, conversion_estimated
     FROM food_logs
     ORDER BY logged_at DESC
@@ -402,7 +416,7 @@ def get_daily_food_logs(
     """Fetch food logs for a given day (date_prefix in ISO 8601, e.g. 'YYYY-MM-DD')."""
     sql = """
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats, alcohol,
            nutrition_source, conversion_estimated
     FROM food_logs
     WHERE date(logged_at, 'localtime') = ?
@@ -561,7 +575,7 @@ def get_food_logs_in_range(
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"""
     SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+           state, is_estimated, calories, protein_raw, protein_usable, carbs, fats, alcohol,
            nutrition_source, conversion_estimated
     FROM food_logs
     {where_clause}
@@ -845,7 +859,7 @@ def get_food_logs_between_days(
     cursor = conn.execute(
         """
         SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-               state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+               state, is_estimated, calories, protein_raw, protein_usable, carbs, fats, alcohol,
                nutrition_source, conversion_estimated
         FROM food_logs
         WHERE date(logged_at, 'localtime') BETWEEN ? AND ?
@@ -1114,7 +1128,7 @@ def get_unified_records(
         cursor.execute(
             """
             SELECT id, logged_at, raw_input, food_name_matched, amount_g, state,
-                   calories, protein_raw, protein_usable, carbs, fats, nutrition_source,
+                   calories, protein_raw, protein_usable, carbs, fats, alcohol, nutrition_source,
                    conversion_estimated
             FROM food_logs
             ORDER BY logged_at DESC
@@ -1245,7 +1259,7 @@ def get_food_log(conn: sqlite3.Connection, log_id: int) -> CalculatedFoodLog | N
     row = conn.execute(
         """
         SELECT id, logged_at, raw_input, food_name_matched, amount_g,
-               state, is_estimated, calories, protein_raw, protein_usable, carbs, fats,
+               state, is_estimated, calories, protein_raw, protein_usable, carbs, fats, alcohol,
                nutrition_source, conversion_estimated
         FROM food_logs WHERE id = ?
         """,
@@ -1301,7 +1315,7 @@ def update_food_log(conn: sqlite3.Connection, log: CalculatedFoodLog) -> Calcula
         UPDATE food_logs
         SET food_name_matched = ?, amount_g = ?, state = ?, is_estimated = ?,
             calories = ?, protein_raw = ?, protein_usable = ?, carbs = ?, fats = ?,
-            nutrition_source = ?, conversion_estimated = ?
+            alcohol = ?, nutrition_source = ?, conversion_estimated = ?
         WHERE id = ?
         """,
         (
@@ -1314,6 +1328,7 @@ def update_food_log(conn: sqlite3.Connection, log: CalculatedFoodLog) -> Calcula
             log.protein_usable,
             log.carbs,
             log.fats,
+            log.alcohol,
             log.nutrition_source,
             1 if log.conversion_estimated else 0,
             log.id,

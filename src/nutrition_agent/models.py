@@ -13,6 +13,28 @@ MAX_WEIGHT_KG: float = 300.0
 MIN_FOOD_MATCH_SCORE: float = 75.0
 MAX_UNIT_GRAMS: float = 5000.0
 
+# Energy per gram. Ethanol is not a macronutrient but it does carry calories, and
+# leaving it out is what made every beer estimate look "inconsistent".
+KCAL_PER_G_PROTEIN: float = 4.0
+KCAL_PER_G_CARBS: float = 4.0
+KCAL_PER_G_FAT: float = 9.0
+KCAL_PER_G_ALCOHOL: float = 7.0
+
+
+def energy_from_macros(
+    protein: float,
+    carbs: float,
+    fats: float,
+    alcohol: float = 0.0,
+) -> float:
+    """Energy in kcal explained by the macros plus ethanol."""
+    return (
+        protein * KCAL_PER_G_PROTEIN
+        + carbs * KCAL_PER_G_CARBS
+        + fats * KCAL_PER_G_FAT
+        + alcohol * KCAL_PER_G_ALCOHOL
+    )
+
 
 def utc_now_iso() -> str:
     """Return current UTC timestamp in ISO 8601 format."""
@@ -277,6 +299,10 @@ class FoodDefinition(BaseModel):
 
     ``source`` distinguishes curated catalog entries from nutrition values that
     were estimated by the LLM for a food missing from the catalog.
+
+    ``alcohol`` is ethanol in grams per 100 g. It carries 7 kcal/g and is listed
+    separately because it is not a macronutrient: without it the calories of beer,
+    wine or spirits cannot be reconciled with their protein, carbs and fat.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -287,6 +313,7 @@ class FoodDefinition(BaseModel):
     diaas_coefficient: float = 0.70
     carbs: float
     fats: float
+    alcohol: float = 0.0
     source: Literal["curated", "ai"] = "curated"
 
 
@@ -300,6 +327,14 @@ class EstimatedFoodNutrition(BaseModel):
     protein: float = Field(description="Bílkoviny na 100 g v gramech")
     carbs: float = Field(description="Sacharidy na 100 g v gramech")
     fats: float = Field(description="Tuky na 100 g v gramech")
+    alcohol: float = Field(
+        default=0.0,
+        description=(
+            "Čistý etanol v gramech na 100 g nebo 100 ml. U piva, vína a destilátů "
+            "sem patří energie z alkoholu, protože 1 g etanolu má 7 kcal. "
+            "U nealkoholických potravin nech 0."
+        ),
+    )
     protein_category: Literal[
         "animal",
         "plant_isolate",
@@ -312,7 +347,7 @@ class EstimatedFoodNutrition(BaseModel):
         description="Kategorie zdroje bílkovin pro DIAAS diskontování",
     )
 
-    @field_validator("calories", "protein", "carbs", "fats")
+    @field_validator("calories", "protein", "carbs", "fats", "alcohol")
     @classmethod
     def validate_non_negative(cls, value: float) -> float:
         """Nutrition values cannot be negative (Fail Fast)."""
@@ -322,13 +357,17 @@ class EstimatedFoodNutrition(BaseModel):
 
     @model_validator(mode="after")
     def validate_energy_consistency(self) -> "EstimatedFoodNutrition":
-        """Reject estimates whose macros cannot add up to the stated energy."""
-        macro_energy = self.protein * 4.0 + self.carbs * 4.0 + self.fats * 9.0
+        """Reject estimates whose macros and alcohol cannot explain the energy.
+
+        Ethanol counts at 7 kcal/g. Leaving it out is what used to make every beer
+        estimate fail as 'inconsistent'.
+        """
+        macro_energy = energy_from_macros(self.protein, self.carbs, self.fats, self.alcohol)
         if self.calories > 0 and macro_energy > 0:
             deviation = abs(macro_energy - self.calories) / self.calories
             if deviation > 0.35:
                 raise ValueError(
-                    f"Odhad je nekonzistentní: makra dávají {macro_energy:.0f} kcal, "
+                    f"Odhad je nekonzistentní: makra a alkohol dávají {macro_energy:.0f} kcal, "
                     f"ale uvedeno je {self.calories:.0f} kcal."
                 )
         return self
@@ -381,6 +420,7 @@ class CalculatedFoodLog(BaseModel):
     protein_usable: float
     carbs: float
     fats: float
+    alcohol: float = 0.0
     nutrition_source: Literal["curated", "ai"] = "curated"
     conversion_estimated: bool = False
 

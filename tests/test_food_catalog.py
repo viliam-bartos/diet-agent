@@ -347,10 +347,92 @@ def test_jidlo_command_partial_numbers_are_rejected(cli_db: sqlite3.Connection):
     from nutrition_agent.cli import correct_food_nutrition
 
     result = correct_food_nutrition(cli_db, "kuřecí prsa 120 24")
-    assert "zadej všechny čtyři hodnoty" in result
+    assert "čtyři nebo pět hodnot" in result
 
     stored = get_food(cli_db, "kuřecí prsa")
     assert stored is not None and stored.calories == 106.0
+
+
+def test_jidlo_command_keeps_alcohol_when_not_given(cli_db: sqlite3.Connection):
+    """Correcting a drink without the fifth value must not drop its alcohol.
+
+    Beer energy comes mostly from ethanol, so silently zeroing it would make the
+    stored calories unexplainable.
+    """
+    from nutrition_agent.cli import correct_food_nutrition
+    from nutrition_agent.models import FoodDefinition
+    from nutrition_agent.repository import save_learned_food
+
+    save_learned_food(
+        cli_db,
+        FoodDefinition(
+            name="pivo",
+            calories=43.0,
+            protein=0.5,
+            carbs=3.5,
+            fats=0.0,
+            alcohol=4.0,
+            source="ai",
+        ),
+    )
+
+    result = correct_food_nutrition(cli_db, "pivo 44 0.5 3.6 0")
+    assert "Alkohol: 4.00 g" in result
+
+    stored = get_food(cli_db, "pivo")
+    assert stored is not None
+    assert stored.alcohol == 4.0
+    assert stored.calories == 44.0
+
+
+def test_jidlo_command_accepts_alcohol_as_a_fifth_value(cli_db: sqlite3.Connection):
+    """A fifth number sets the alcohol content explicitly."""
+    from nutrition_agent.cli import correct_food_nutrition
+    from nutrition_agent.models import FoodDefinition
+    from nutrition_agent.repository import save_learned_food
+
+    save_learned_food(
+        cli_db,
+        FoodDefinition(
+            name="víno bílé",
+            calories=82.0,
+            protein=0.1,
+            carbs=2.6,
+            fats=0.0,
+            alcohol=9.6,
+            source="ai",
+        ),
+    )
+
+    correct_food_nutrition(cli_db, "víno bílé 80 0.1 2.5 0 9.0")
+
+    stored = get_food(cli_db, "víno bílé")
+    assert stored is not None
+    assert stored.alcohol == 9.0
+    assert stored.calories == 80.0
+
+
+def test_jidlo_command_shows_alcohol_when_present(cli_db: sqlite3.Connection):
+    """Inspection lists alcohol so the energy stays explainable."""
+    from nutrition_agent.cli import correct_food_nutrition
+    from nutrition_agent.models import FoodDefinition
+    from nutrition_agent.repository import save_learned_food
+
+    save_learned_food(
+        cli_db,
+        FoodDefinition(
+            name="rum 40%",
+            calories=224.0,
+            protein=0.0,
+            carbs=0.0,
+            fats=0.0,
+            alcohol=32.0,
+            source="ai",
+        ),
+    )
+
+    result = correct_food_nutrition(cli_db, "rum 40%")
+    assert "Alkohol: 32.00 g (224 kcal)" in result
 
 
 def test_jidlo_command_rejects_negative_values(cli_db: sqlite3.Connection):

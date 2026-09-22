@@ -343,6 +343,7 @@ def calculate_food_log(
     protein_usable = calculate_usable_protein(protein_raw, food_def.diaas_coefficient)
     carbs = round(food_def.carbs * multiplier, 2)
     fats = round(food_def.fats * multiplier, 2)
+    alcohol = round(food_def.alcohol * multiplier, 2)
 
     return CalculatedFoodLog(
         raw_input=raw_input,
@@ -355,6 +356,7 @@ def calculate_food_log(
         protein_usable=protein_usable,
         carbs=carbs,
         fats=fats,
+        alcohol=alcohol,
         nutrition_source=food_def.source,
         conversion_estimated=conversion_estimated,
     )
@@ -392,6 +394,7 @@ def recalculate_food_log(
             "protein_usable": calculate_usable_protein(protein_raw, food_def.diaas_coefficient),
             "carbs": round(food_def.carbs * multiplier, 2),
             "fats": round(food_def.fats * multiplier, 2),
+            "alcohol": round(food_def.alcohol * multiplier, 2),
             "nutrition_source": food_def.source,
         }
     )
@@ -408,6 +411,7 @@ def build_food_from_estimate(estimate: EstimatedFoodNutrition) -> FoodDefinition
         protein=round(estimate.protein, 2),
         carbs=round(estimate.carbs, 2),
         fats=round(estimate.fats, 2),
+        alcohol=round(estimate.alcohol, 2),
         diaas_coefficient=get_coefficient_for_category(estimate.protein_category),
         source="ai",
     )
