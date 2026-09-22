@@ -1,0 +1,48 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One deploy at a time: a second push waits instead of racing the first over the same
+# container and the same SQLite file.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # A GitHub-hosted runner cannot reach this machine's Docker daemon, so the job needs a
+    # self-hosted runner installed on the machine that hosts the bot.
+    runs-on: self-hosted
+    steps:
+      - name: Pull and rebuild the container
+        env:
+          # Repository variable; when unset the clone is expected in ~/diet-agent.
+          PROJECT_DIR: ${{ vars.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          target="${PROJECT_DIR:-$HOME/diet-agent}"
+          if [ ! -f "$target/docker-compose.yml" ]; then
+            echo "V '$target' není docker-compose.yml. Nastav v repozitáři proměnnou PROJECT_DIR." >&2
+            exit 1
+          fi
+          cd "$target"
+          GIT_TERMINAL_PROMPT=0 git pull --ff-only
+          docker compose up -d --build --remove-orphans
+          # Untagged leftovers from previous builds, otherwise every deploy leaves an image.
+          docker image prune -f || true
+
+      - name: Wait for the dashboard
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/version; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Dashboard neodpovídá, poslední logy:" >&2
+          docker logs --tail 50 nutrition-agent >&2
+          exit 1

@@ -112,6 +112,23 @@ Co je potřeba vědět:
 
 Kontejner staví na `python:3.12-slim`, instaluje závislosti z `pyproject.toml` a běží pod běžným uživatelem. Ověření, že obraz funguje, dělá healthcheck na `/api/version`.
 
+### Nasazení po pushi (self-hosted runner)
+
+Runner sám nic nenasadí — je to jen stroj, na kterém GitHub spouští workflows. Teprve soubor `.github/workflows/deploy.yml` říká, co má po pushi udělat: `git pull`, `docker compose up -d --build` a kontrolu, že dashboard odpovídá na `/api/version`. Když v repu žádný workflow není, push opravdu nic nespustí.
+
+Co je potřeba nastavit na stroji, kde běží bot:
+
+1. Runner založit v repozitáři přes **Settings → Actions → Runners → New self-hosted runner** a nainstalovat ho podle vypsaných příkazů (`./config.sh`, pak `sudo ./svc.sh install && sudo ./svc.sh start`). Službu spouštěj pod uživatelem, který vlastní klon repozitáře.
+2. Uživatel runneru musí umět Docker: `sudo usermod -aG docker $USER` a potom restartovat službu runneru.
+3. Když klon neleží v `~/diet-agent`, nastav v **Settings → Variables** proměnnou `PROJECT_DIR` s jeho cestou.
+
+Workflow používá proměnnou `PROJECT_DIR`, a proto potřebuje jen čtení repozitáře a běžící Docker; žádná tajemství v GitHubu nepotřebuje, protože `.env` zůstává na stroji. Nasazení běží jedno po druhém (viz `concurrency`), aby se dvě instance nepraly o SQLite soubor.
+
+Dvě věci, které stojí za pozornost:
+
+- Job se rozjede jen ve chvíli, kdy je stroj zapnutý a služba runneru běží. Když je offline, zůstane ve frontě a doběhne po připojení.
+- Self-hosted runner spouští kód z repozitáře přímo na tvém stroji. U privátního repa je to bezpečné; kdyby se repo zveřejnilo, nespouštěj na něm workflow z cizích pull requestů.
+
 ---
 
 ## Rychlý start na Windows
