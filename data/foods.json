@@ -208,6 +208,22 @@
     "fats": 0.2
   },
   {
+    "name": "Banán",
+    "calories": 88.0,
+    "protein": 1.1,
+    "diaas_coefficient": 0.50,
+    "carbs": 22.8,
+    "fats": 0.3
+  },
+  {
+    "name": "Kuřecí prsa (syrová)",
+    "calories": 106.0,
+    "protein": 23.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.0,
+    "fats": 1.2
+  },
+  {
     "name": "Kuřecí stehno pečené (maso bez kosti)",
     "calories": 217.0,
     "protein": 23.3,
@@ -222,6 +238,14 @@
     "diaas_coefficient": 1.00,
     "carbs": 0.0,
     "fats": 4.2
+  },
+  {
+    "name": "Vejce slepičí celé",
+    "calories": 140.0,
+    "protein": 12.0,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.7,
+    "fats": 10.0
   },
   {
     "name": "Eidam 30% tuku v sušině",
@@ -249,11 +273,11 @@
   },
   {
     "name": "Prom-IN CFM Pure Performance (syrovátkový protein)",
-    "calories": 383.0,
-    "protein": 73.3,
+    "calories": 396.0,
+    "protein": 74.0,
     "diaas_coefficient": 1.00,
-    "carbs": 5.0,
-    "fats": 5.0
+    "carbs": 8.6,
+    "fats": 7.2
   },
   {
     "name": "Máslo 82%",
@@ -294,5 +318,59 @@
     "diaas_coefficient": 0.00,
     "carbs": 5.8,
     "fats": 0.0
+  },
+  {
+    "name": "Toustový chléb pšeničný",
+    "weight_g": 100.0,
+    "calories": 260.0,
+    "protein": 8.0,
+    "diaas_coefficient": 0.50,
+    "carbs": 48.0,
+    "fats": 2.0
+  },
+  {
+    "name": "Máslo 82%",
+    "weight_g": 15.0,
+    "calories": 110.0,
+    "protein": 0.1,
+    "diaas_coefficient": 1.00,
+    "carbs": 0.1,
+    "fats": 12.3
+  },
+  {
+    "name": "Marmeláda",
+    "weight_g": 30.0,
+    "calories": 67.2,
+    "protein": 0.1,
+    "diaas_coefficient": 0.50,
+    "carbs": 16.3,
+    "fats": 0.0
+  },
+  {
+    "name": "Tvaroh odtučněný",
+    "weight_g": 250.0,
+    "calories": 160.0,
+    "protein": 27.5,
+    "diaas_coefficient": 1.00,
+    "carbs": 10.0,
+    "fats": 0.5
+  },
+  {
+    "name": "Cukr bílý",
+    "weight_g": 10.0,
+    "calories": 40.0,
+    "protein": 0.0,
+    "diaas_coefficient": 0.00,
+    "carbs": 10.0,
+    "fats": 0.0
+  },
+  {
+    "name": "K-Classic tvarohová tyčinka vanilková",
+    "weight_g": 40.0,
+    "calories": 149.6,
+    "protein": 5.3,
+    "diaas_coefficient": 1.00,
+    "carbs": 10.0,
+    "fats": 9.7
   }
 ]

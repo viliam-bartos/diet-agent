@@ -93,8 +93,8 @@ GENERIC_MEASURE_WEIGHTS_GRAMS: dict[str, float] = {
     "lžička": 5.0,
     "lžička oleje": 5.0,
     "hrnek": 240.0,
-    "odměrka": 30.0,
-    "odměrka proteinu": 30.0,
+    "odměrka": 20.0,
+    "odměrka proteinu": 20.0,
     "plátek": 20.0,
     "krajíc": 40.0,
 }
