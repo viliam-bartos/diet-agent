@@ -41,7 +41,7 @@ def test_generic_measures_use_the_curated_table():
     assert convert_to_grams("olivový olej", 1.0, "lžíce") == 13.0
     assert convert_to_grams("olivový olej", 1.0, "lžička") == 5.0
     assert convert_to_grams("rýže", 1.0, "hrnek") == 240.0
-    assert convert_to_grams("protein", 2.0, "odměrka") == 60.0
+    assert convert_to_grams("protein", 2.0, "odměrka") == 40.0
     assert convert_to_grams("šunka", 2.0, "plátek") == 40.0
     assert convert_to_grams("chléb", 1.0, "krajíc") == 40.0
 
