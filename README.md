@@ -124,10 +124,13 @@ Co je potřeba nastavit na stroji, kde běží bot:
 
 Workflow používá proměnnou `PROJECT_DIR`, a proto potřebuje jen čtení repozitáře a běžící Docker; žádná tajemství v GitHubu nepotřebuje, protože `.env` zůstává na stroji. Nasazení běží jedno po druhém (viz `concurrency`), aby se dvě instance nepraly o SQLite soubor.
 
-Dvě věci, které stojí za pozornost:
+Klon na stroji musí být čistý — deploy dělá `git pull --ff-only`, takže necommitnuté změny v `docker-compose.yml` ho zastaví. Všechno, co se v nasazeném prostředí liší (port, adresa, zóna, uid), patří do `.env`: compose z něj čte `WEB_BIND`, `DASHBOARD_URL`, `TZ`, `PUID` i `PGID`. Když pull kvůli změnám spadne, jobs to vypíše i s cestou k souboru; hodnoty přenes do `.env` a změny v klonu zahoď (`git checkout -- docker-compose.yml`).
+
+Tři věci, které stojí za pozornost:
 
 - Job se rozjede jen ve chvíli, kdy je stroj zapnutý a služba runneru běží. Když je offline, zůstane ve frontě a doběhne po připojení.
 - Self-hosted runner spouští kód z repozitáře přímo na tvém stroji. U privátního repa je to bezpečné; kdyby se repo zveřejnilo, nespouštěj na něm workflow z cizích pull requestů.
+- Když se klon a repo rozejdou natrvalo, je čistší řešení než ruční merge klon zahodit (`git reset --hard origin/main`) — o data nepřijdeš, ta leží ve `data/`, které git ignoruje. Je to ale destruktivní operace, tak ji dělej vědomě.
 
 ---
 

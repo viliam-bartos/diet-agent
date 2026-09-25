@@ -17,7 +17,7 @@ jobs:
     # self-hosted runner installed on the machine that hosts the bot.
     runs-on: self-hosted
     steps:
-      - name: Pull and rebuild the container
+      - name: Check the clone for local changes
         env:
           # Repository variable; when unset the clone is expected in ~/diet-agent.
           PROJECT_DIR: ${{ vars.PROJECT_DIR }}
@@ -28,6 +28,23 @@ jobs:
             echo "V '$target' není docker-compose.yml. Nastav v repozitáři proměnnou PROJECT_DIR." >&2
             exit 1
           fi
+          cd "$target"
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Klon v '$target' má necommitnuté změny, takže by je pull přepsal:" >&2
+            git status --short >&2
+            echo >&2
+            echo "Nastavení patří do .env, který v gitu není (WEB_BIND, DASHBOARD_URL, TZ," >&2
+            echo "PUID, PGID). Po přenesení hodnot změny v klonu zahoď:" >&2
+            echo "  cd $target && git checkout -- docker-compose.yml" >&2
+            exit 1
+          fi
+
+      - name: Pull and rebuild the container
+        env:
+          PROJECT_DIR: ${{ vars.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          target="${PROJECT_DIR:-$HOME/diet-agent}"
           cd "$target"
           GIT_TERMINAL_PROMPT=0 git pull --ff-only
           docker compose up -d --build --remove-orphans
