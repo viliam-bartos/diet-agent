@@ -55,7 +55,6 @@ from nutrition_agent.repository import (
     update_food_nutrition,
 )
 from nutrition_agent.targets import (
-    DayType,
     calculate_daily_targets,
     parse_day_type,
     parse_goal,
@@ -428,7 +427,8 @@ def handle_user_message(
         if logged_at:
             workout_log = workout_log.model_copy(update={"logged_at": logged_at})
         save_workout_log(conn, workout_log)
-        set_day_type(conn, target_day or local_date(utc_now_iso()), DayType.TRAINING)
+        # Nothing else is stored: the workout itself makes its day a training day, so
+        # deleting the workout takes the training day with it.
         dur_info = f" ({dur} min)" if dur else ""
         day_info = f" na den {target_day}" if target_day else ""
         return (

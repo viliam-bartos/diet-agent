@@ -1262,45 +1262,43 @@ def get_unified_records(
     return paginated, total_count
 
 
-# Table names are fixed constants, never user input.
-DAY_LOG_TABLES: dict[str, str] = {
-    "food": "food_logs",
-    "weight": "weight_logs",
-    "workout": "workout_logs",
+# Table names and the column that holds the local day are fixed constants, never user input.
+# day_types is keyed by the day itself, the logs by their timestamp.
+DAY_LOG_TABLES: dict[str, tuple[str, str]] = {
+    "food": ("food_logs", "date(logged_at, 'localtime')"),
+    "weight": ("weight_logs", "date(logged_at, 'localtime')"),
+    "workout": ("workout_logs", "date(logged_at, 'localtime')"),
+    "day_type": ("day_types", "date"),
 }
 
 DAY_LOG_LABELS: dict[str, str] = {
     "food": "Jídla",
     "weight": "Vážení",
     "workout": "Tréninky",
+    "day_type": "Typ dne",
 }
 
 
 def count_day_logs(conn: sqlite3.Connection, date_prefix: str) -> dict[str, int]:
-    """Count food, weight and workout records for a given day."""
+    """Count food, weight, workout and day-type records for a given day."""
     cursor = conn.cursor()
     counts: dict[str, int] = {}
-    for key, table in DAY_LOG_TABLES.items():
-        cursor.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE date(logged_at, 'localtime') = ?",
-            (date_prefix,),
-        )
+    for key, (table, day_column) in DAY_LOG_TABLES.items():
+        cursor.execute(f"SELECT COUNT(*) FROM {table} WHERE {day_column} = ?", (date_prefix,))
         counts[key] = int(cursor.fetchone()[0])
     return counts
 
 
 def delete_day_logs(conn: sqlite3.Connection, date_prefix: str) -> dict[str, int]:
-    """Delete every food, weight and workout record for a given day.
+    """Delete every food, weight, workout and day-type record for a given day.
 
-    Returns the number of deleted rows per record type.
+    An explicitly chosen day type goes with the day, otherwise the calendar would keep
+    announcing a training day after its records were wiped.
     """
     cursor = conn.cursor()
     deleted: dict[str, int] = {}
-    for key, table in DAY_LOG_TABLES.items():
-        cursor.execute(
-            f"DELETE FROM {table} WHERE date(logged_at, 'localtime') = ?",
-            (date_prefix,),
-        )
+    for key, (table, day_column) in DAY_LOG_TABLES.items():
+        cursor.execute(f"DELETE FROM {table} WHERE {day_column} = ?", (date_prefix,))
         deleted[key] = int(cursor.rowcount)
     conn.commit()
     return deleted
@@ -1444,7 +1442,34 @@ def delete_weight_log(conn: sqlite3.Connection, log_id: int) -> bool:
 
 
 def delete_workout_log(conn: sqlite3.Connection, log_id: int) -> bool:
-    """Delete a single workout log. Returns True when a row was removed."""
+    """Delete a single workout log. Returns True when a row was removed.
+
+    A stored training day that only existed because of this workout goes with it,
+    otherwise the day would keep the higher training target without a workout behind it.
+    """
+    existing = get_workout_log(conn, log_id)
     cursor = conn.execute("DELETE FROM workout_logs WHERE id = ?", (log_id,))
+    if cursor.rowcount == 0:
+        conn.commit()
+        return False
+
+    if existing is not None:
+        _drop_implied_training_day(conn, local_date(existing.logged_at))
+
     conn.commit()
-    return cursor.rowcount > 0
+    return True
+
+
+def _drop_implied_training_day(conn: sqlite3.Connection, day: str) -> None:
+    """Remove a training day type that the deleted workout was the only reason for."""
+    remaining = conn.execute(
+        "SELECT COUNT(*) FROM workout_logs WHERE date(logged_at, 'localtime') = ?",
+        (day,),
+    ).fetchone()[0]
+    if remaining:
+        return
+
+    conn.execute(
+        "DELETE FROM day_types WHERE date = ? AND day_type = ?",
+        (day, DayType.TRAINING.value),
+    )

@@ -219,6 +219,29 @@ def _migrate_stored_day_type(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM user_settings WHERE key = 'day_type'")
 
 
+def _drop_redundant_day_types(conn: sqlite3.Connection) -> None:
+    """Remove day-type rows that only repeat what the logs already say.
+
+    Logging a workout used to store the day type as well, so deleting the workout left
+    the day announced as a training day. Such a row carries nothing the workout log does
+    not already hold, so it is dropped here and the day follows its records again.
+    """
+    if not _table_exists(conn, "day_types") or not _table_exists(conn, "workout_logs"):
+        return
+
+    conn.execute(
+        """
+        DELETE FROM day_types
+        WHERE (day_type = 'training' AND EXISTS (
+                   SELECT 1 FROM workout_logs
+                   WHERE date(logged_at, 'localtime') = day_types.date))
+           OR (day_type = 'rest' AND NOT EXISTS (
+                   SELECT 1 FROM workout_logs
+                   WHERE date(logged_at, 'localtime') = day_types.date))
+        """
+    )
+
+
 def init_db(db_path: str | Path) -> None:
     """Initialize SQLite tables, indices and pending migrations."""
     with get_connection(db_path) as conn:
@@ -226,3 +249,4 @@ def init_db(db_path: str | Path) -> None:
         conn.executescript(SCHEMA_SQL)
         _apply_column_migrations(conn)
         _migrate_stored_day_type(conn)
+        _drop_redundant_day_types(conn)

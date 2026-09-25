@@ -161,6 +161,40 @@ def test_config_supports_foods_db_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.foods_db_path == s.foods_data_path
 
 
+def test_redundant_day_types_are_dropped_on_startup(mem_db: sqlite3.Connection) -> None:
+    """A stored type that only repeats the workout log is removed.
+
+    Logging a workout used to store the day type as well, so deleting the workout left
+    the day announced as a training day with no workout behind it.
+    """
+    from nutrition_agent.db import _drop_redundant_day_types
+    from nutrition_agent.models import CalculatedWorkoutLog
+    from nutrition_agent.repository import get_day_type, save_workout_log, set_day_type
+    from nutrition_agent.targets import DayType
+
+    save_workout_log(
+        mem_db,
+        CalculatedWorkoutLog(
+            logged_at="2026-09-21T17:00:00+00:00",
+            raw_input="trenink gym 60 min",
+            workout_type="gym",
+            duration_minutes=60,
+        ),
+    )
+    set_day_type(mem_db, "2026-09-21", DayType.TRAINING)  # repeats the workout
+    set_day_type(mem_db, "2026-09-20", DayType.REST)  # repeats the empty day
+    set_day_type(mem_db, "2026-09-22", DayType.TRAINING)  # a statement of its own
+
+    _drop_redundant_day_types(mem_db)
+
+    rows = [row["date"] for row in mem_db.execute("SELECT date FROM day_types")]
+    assert rows == ["2026-09-22"]
+    # Nothing changes for the user: every day still resolves to the same type.
+    assert get_day_type(mem_db, "2026-09-21") == DayType.TRAINING
+    assert get_day_type(mem_db, "2026-09-20") == DayType.REST
+    assert get_day_type(mem_db, "2026-09-22") == DayType.TRAINING
+
+
 def test_day_type_is_stored_per_date(mem_db: sqlite3.Connection) -> None:
     """A day type belongs to one date and never leaks into the next day."""
     from nutrition_agent.repository import get_day_type, set_day_type

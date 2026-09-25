@@ -27,6 +27,7 @@ from nutrition_agent.repository import (
     update_weight_log,
     update_workout_log,
 )
+from nutrition_agent.targets import DayType
 
 # Sandbox restricts the OS temp directory, so test databases live in the workspace.
 TEST_TMP_ROOT = Path(__file__).resolve().parent.parent / ".tmp" / "tests"
@@ -349,6 +350,54 @@ def test_api_delete_unknown_record_type(edit_client):
     """Deleting with an unsupported type is rejected."""
     client, _ = edit_client
     assert client.delete("/api/records/nesmysl/1").status_code == 422
+
+
+def test_deleting_a_workout_reverts_the_day_type(edit_client, record_db):
+    """Removing the workout must take the training day with it.
+
+    The day used to stay marked as a training day, so the targets kept using the higher
+    training goal even though nothing was trained any more.
+    """
+    from nutrition_agent.repository import get_day_type, set_day_type
+
+    client, ids = edit_client
+    conn, _ = record_db
+
+    # A stored type of the kind the older version wrote next to every workout.
+    set_day_type(conn, TODAY, DayType.TRAINING)
+
+    assert get_day_type(conn, TODAY) == DayType.TRAINING
+    assert client.get("/api/day").json()["day_type"] == "training"
+
+    assert client.delete(f"/api/records/workout/{ids['workout']}").status_code == 200
+
+    assert get_day_type(conn, TODAY) == DayType.REST
+    day = client.get("/api/day").json()
+    assert day["day_type"] == "rest"
+    assert day["has_workout"] is False
+
+
+def test_deleting_one_of_two_workouts_keeps_the_training_day(edit_client, record_db):
+    """The day stays a training day while another workout of that day remains."""
+    from nutrition_agent.models import CalculatedWorkoutLog
+    from nutrition_agent.repository import get_day_type, save_workout_log, set_day_type
+
+    client, ids = edit_client
+    conn, _ = record_db
+
+    set_day_type(conn, TODAY, DayType.TRAINING)
+    save_workout_log(
+        conn,
+        CalculatedWorkoutLog(
+            logged_at=f"{TODAY}T19:00:00+00:00",
+            raw_input="trenink beh 30 min",
+            workout_type="běh",
+            duration_minutes=30,
+        ),
+    )
+
+    assert client.delete(f"/api/records/workout/{ids['workout']}").status_code == 200
+    assert get_day_type(conn, TODAY) == DayType.TRAINING
 
 
 def test_api_patch_food_fails_when_food_left_catalog(edit_client, record_db):

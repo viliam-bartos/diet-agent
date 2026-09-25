@@ -137,20 +137,30 @@ def test_parse_date_argument_fails_fast(bad_value: str):
 def test_count_day_logs_per_day(two_day_db: sqlite3.Connection):
     """Counts are reported per record type for the requested day only."""
     counts = count_day_logs(two_day_db, "2026-09-15")
-    assert counts == {"food": 1, "weight": 1, "workout": 1}
+    assert counts == {"food": 1, "weight": 1, "workout": 1, "day_type": 0}
 
-    assert count_day_logs(two_day_db, "2026-01-01") == {"food": 0, "weight": 0, "workout": 0}
+    assert count_day_logs(two_day_db, "2026-01-01") == {
+        "food": 0,
+        "weight": 0,
+        "workout": 0,
+        "day_type": 0,
+    }
 
 
 def test_delete_day_logs_removes_only_that_day(two_day_db: sqlite3.Connection):
     """Deleting one day leaves the other day untouched."""
     deleted = delete_day_logs(two_day_db, "2026-09-15")
-    assert deleted == {"food": 1, "weight": 1, "workout": 1}
+    assert deleted == {"food": 1, "weight": 1, "workout": 1, "day_type": 0}
 
-    assert count_day_logs(two_day_db, "2026-09-15") == {"food": 0, "weight": 0, "workout": 0}
+    assert count_day_logs(two_day_db, "2026-09-15") == {
+        "food": 0,
+        "weight": 0,
+        "workout": 0,
+        "day_type": 0,
+    }
 
     remaining = count_day_logs(two_day_db, "2026-09-16")
-    assert remaining == {"food": 1, "weight": 1, "workout": 1}
+    assert remaining == {"food": 1, "weight": 1, "workout": 1, "day_type": 0}
     assert len(get_daily_food_logs(two_day_db, "2026-09-16")) == 1
     assert len(get_recent_weight_logs(two_day_db)) == 1
     assert len(get_recent_workout_logs(two_day_db)) == 1
@@ -162,9 +172,15 @@ def test_delete_day_logs_on_empty_day_reports_zeros(two_day_db: sqlite3.Connecti
         "food": 0,
         "weight": 0,
         "workout": 0,
+        "day_type": 0,
     }
     # Nothing else was touched
-    assert count_day_logs(two_day_db, "2026-09-15") == {"food": 1, "weight": 1, "workout": 1}
+    assert count_day_logs(two_day_db, "2026-09-15") == {
+        "food": 1,
+        "weight": 1,
+        "workout": 1,
+        "day_type": 0,
+    }
 
 
 def test_delete_day_is_idempotent(two_day_db: sqlite3.Connection):
@@ -174,6 +190,7 @@ def test_delete_day_is_idempotent(two_day_db: sqlite3.Connection):
         "food": 0,
         "weight": 0,
         "workout": 0,
+        "day_type": 0,
     }
 
 
@@ -184,6 +201,18 @@ def test_delete_day_does_not_touch_user_settings(two_day_db: sqlite3.Connection)
     set_user_setting(two_day_db, "goal", "cut")
     delete_day_logs(two_day_db, "2026-09-15")
     assert get_user_setting(two_day_db, "goal") == "cut"
+
+
+def test_delete_day_also_clears_the_chosen_day_type(two_day_db: sqlite3.Connection):
+    """Wiping a day takes its day type with it, so no phantom training day is left."""
+    from nutrition_agent.repository import get_day_type, set_day_type
+    from nutrition_agent.targets import DayType
+
+    set_day_type(two_day_db, "2026-09-15", DayType.TRAINING)
+
+    deleted = delete_day_logs(two_day_db, "2026-09-15")
+    assert deleted["day_type"] == 1
+    assert get_day_type(two_day_db, "2026-09-15") == DayType.REST
 
 
 def test_cli_delete_day_command_with_explicit_date(two_day_db: sqlite3.Connection):
@@ -197,7 +226,12 @@ def test_cli_delete_day_command_with_explicit_date(two_day_db: sqlite3.Connectio
     assert "- Tréninky: 1" in result
     assert "Celkem smazáno 3 záznamů" in result
 
-    assert count_day_logs(two_day_db, "2026-09-16") == {"food": 1, "weight": 1, "workout": 1}
+    assert count_day_logs(two_day_db, "2026-09-16") == {
+        "food": 1,
+        "weight": 1,
+        "workout": 1,
+        "day_type": 0,
+    }
 
     # The standalone helper produces the same report
     assert delete_day(two_day_db, "2026-09-16").startswith("Vymazány záznamy pro den 2026-09-16")
@@ -242,7 +276,12 @@ def test_cli_delete_day_command_accepts_czech_variants():
         conn = _seeded_db()
         result = handle_user_message(f"{command} 2026-09-15", [], conn)
         assert "Vymazány záznamy pro den 2026-09-15" in result, command
-        assert count_day_logs(conn, "2026-09-15") == {"food": 0, "weight": 0, "workout": 0}
+        assert count_day_logs(conn, "2026-09-15") == {
+            "food": 0,
+            "weight": 0,
+            "workout": 0,
+            "day_type": 0,
+        }
 
 
 def test_cli_delete_day_command_empty_day(two_day_db: sqlite3.Connection):
@@ -259,7 +298,12 @@ def test_cli_delete_day_command_invalid_date_fails_fast(two_day_db: sqlite3.Conn
 
     result = handle_user_message("vymaz 15.9.2026", [], two_day_db)
     assert "Neplatné datum" in result
-    assert count_day_logs(two_day_db, "2026-09-15") == {"food": 1, "weight": 1, "workout": 1}
+    assert count_day_logs(two_day_db, "2026-09-15") == {
+        "food": 1,
+        "weight": 1,
+        "workout": 1,
+        "day_type": 0,
+    }
 
 
 def test_cli_delete_day_flag_routing(monkeypatch: pytest.MonkeyPatch, temp_settings_db):
