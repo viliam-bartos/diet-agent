@@ -281,6 +281,25 @@ def test_dashboard_food_dialog_edits_values_per_100g(api_client: TestClient):
     assert "Nech prázdné právě jedno" in body
 
 
+def test_dashboard_survives_a_missing_chart_library(api_client: TestClient):
+    """The page must render its numbers even when the CDN cannot be reached.
+
+    Chart.js is loaded from jsdelivr. A phone that only reaches this machine (Tailscale
+    without internet) loads the page but not the library, and an unguarded `new Chart`
+    would throw and stop everything that follows.
+
+    This is a proxy check: it reads the template rather than running a browser.
+    """
+    body = api_client.get("/").text
+
+    assert "typeof Chart === 'undefined'" in body
+    assert 'id="weightChartNote"' in body
+
+    # The guard has to stand before the chart is built.
+    guard = body.index("typeof Chart === 'undefined'")
+    assert guard < body.index("new Chart(ctx, {")
+
+
 def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):
     """Descriptive subtitles were removed from the section headers."""
     body = api_client.get("/").text
