@@ -284,20 +284,22 @@ def test_dashboard_food_dialog_edits_values_per_100g(api_client: TestClient):
 def test_dashboard_survives_a_missing_chart_library(api_client: TestClient):
     """The page must render its numbers even when the CDN cannot be reached.
 
-    Chart.js is loaded from jsdelivr. A phone that only reaches this machine (Tailscale
-    without internet) loads the page but not the library, and an unguarded `new Chart`
-    would throw and stop everything that follows.
+    Chart.js comes from jsdelivr and is fetched after the page is up, so a phone that
+    reaches only this machine renders everything else immediately and reports the missing
+    chart instead of waiting for a request that never comes back.
 
     This is a proxy check: it reads the template rather than running a browser.
     """
     body = api_client.get("/").text
 
-    assert "typeof Chart === 'undefined'" in body
-    assert 'id="weightChartNote"' in body
+    # No render-blocking external resource: neither the chart library nor the fonts.
+    assert '<script src="https://cdn.jsdelivr.net' not in body
+    assert 'media="print" onload="this.media=\'all\'"' in body
 
+    assert "await ensureChartLibrary()" in body
+    assert 'id="weightChartNote"' in body
     # The guard has to stand before the chart is built.
-    guard = body.index("typeof Chart === 'undefined'")
-    assert guard < body.index("new Chart(ctx, {")
+    assert body.index("await ensureChartLibrary()") < body.index("new Chart(ctx, {")
 
 
 def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):

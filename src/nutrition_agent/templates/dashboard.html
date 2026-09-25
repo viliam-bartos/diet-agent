@@ -6,8 +6,27 @@
   <title>Nutrition Agent // Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Not render-blocking on purpose: a phone that reaches only this machine would
+       otherwise stare at a blank page until the font request gives up. The fonts are a
+       detail; the numbers are not. -->
+  <link rel="stylesheet" media="print" onload="this.media='all'"
+        href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap">
+  <script>
+    // Registered before the dashboard script, so even a syntax error in that script is
+    // reported. Without this a broken page just stays empty and says nothing.
+    window.showPageError = function (message) {
+      function render() {
+        const banner = document.getElementById('errorBanner');
+        if (!banner) return false;
+        banner.textContent = message;
+        banner.style.display = 'block';
+        return true;
+      }
+      if (!render()) document.addEventListener('DOMContentLoaded', render, { once: true });
+    };
+    window.addEventListener('error', event => window.showPageError('Chyba ve stránce: ' + event.message));
+    window.addEventListener('unhandledrejection', event => window.showPageError('Chyba ve stránce: ' + event.reason));
+  </script>
   <style>
     :root {
       --bg-paper: #F4EFE6;
@@ -777,6 +796,19 @@
       color: var(--ink-muted);
       padding: 10px 0;
     }
+
+    /* A broken render must say so instead of leaving empty cards behind. */
+    .error-banner {
+      display: none;
+      background: #FDE8E8;
+      border: var(--border-technical);
+      border-color: #B21F2D;
+      color: #B21F2D;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -786,6 +818,7 @@
       <span id="staleBannerDetail"></span>
       Zavři okno se serverem a spusť znovu <code>start.bat</code>.
     </div>
+    <div id="errorBanner" class="error-banner"></div>
 
     <header>
       <div class="brand-title">Nutrition Agent</div>
@@ -1005,6 +1038,39 @@
       targetEl.className = 'kpi-subtext';
     }
 
+    // Anything that goes wrong while rendering has to be visible: a silently empty card
+    // is impossible to diagnose from a phone. The banner itself is wired up in the head.
+    function showError(message) {
+      window.showPageError(message);
+    }
+
+    // Chart.js comes from a CDN and is optional. It is fetched after the page is up, so a
+    // phone that reaches only this machine renders everything else immediately instead of
+    // waiting for a request that may never come back.
+    const CHART_CDN_URL = 'https://cdn.jsdelivr.net/npm/chart.js';
+    let chartLibrary = null;
+
+    function ensureChartLibrary(timeoutMs = 5000) {
+      if (typeof Chart !== 'undefined') return Promise.resolve(true);
+      if (!chartLibrary) {
+        chartLibrary = new Promise(resolve => {
+          const script = document.createElement('script');
+          const timer = setTimeout(() => resolve(false), timeoutMs);
+          script.src = CHART_CDN_URL;
+          script.onload = () => {
+            clearTimeout(timer);
+            resolve(typeof Chart !== 'undefined');
+          };
+          script.onerror = () => {
+            clearTimeout(timer);
+            resolve(false);
+          };
+          document.head.appendChild(script);
+        });
+      }
+      return chartLibrary;
+    }
+
     const PAGE_VERSION = '{{APP_VERSION}}';
     // Must match API_LEVEL in web.py; tests/test_web_api.py keeps the two in step.
     // A process started before an API change serves this page from disk but answers
@@ -1098,6 +1164,7 @@
         }
       } catch (err) {
         console.error('Chyba při načítání dne:', err);
+        showError(`Nepodařilo se načíst dnešní přehled: ${err}`);
       }
     }
 
@@ -1144,6 +1211,7 @@
         });
       } catch (err) {
         console.error('Chyba při načítání týdne:', err);
+        showError(`Nepodařilo se načíst týdenní bilanci: ${err}`);
       }
     }
 
@@ -1168,11 +1236,9 @@
         }
 
         const noteEl = document.getElementById('weightChartNote');
-        if (typeof Chart === 'undefined') {
-          // Chart.js comes from a CDN. A phone that only reaches this machine, without
-          // internet, would otherwise throw here and take the rest of the page with it.
+        if (!(await ensureChartLibrary())) {
           noteEl.textContent =
-            'Graf se nezobrazí: knihovna Chart.js se nenačetla (chybí připojení k internetu). ' +
+            'Graf se nezobrazí: knihovna Chart.js se nestáhla (chybí připojení k internetu). ' +
             'Čísla a tabulky fungují dál.';
           return;
         }
@@ -1239,6 +1305,7 @@
         });
       } catch (err) {
         console.error('Chyba při načítání grafu váhy:', err);
+        showError(`Nepodařilo se načíst graf váhy: ${err}`);
       }
     }
 
@@ -1311,6 +1378,7 @@
         });
       } catch (err) {
         console.error('Chyba při načítání heatmapy:', err);
+        showError(`Nepodařilo se načíst kalendář: ${err}`);
       }
     }
 
@@ -1410,6 +1478,7 @@
         document.getElementById('nextPageBtn').disabled = offset + pageSize >= data.total;
       } catch (err) {
         console.error('Chyba při načítání záznamů:', err);
+        showError(`Nepodařilo se načíst tabulku záznamů: ${err}`);
       }
     }
 
