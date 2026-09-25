@@ -23,11 +23,27 @@ class Settings:
     web_port: int = 8000
     target_calories: float | None = None
     target_protein_g: float | None = None
+    dashboard_url: str | None = None
 
     @property
     def foods_db_path(self) -> Path:
         """Alias for foods_data_path."""
         return self.foods_data_path
+
+    @property
+    def dashboard_link(self) -> str:
+        """Address to hand out for opening the dashboard, e.g. from Discord.
+
+        WEB_HOST says where the server binds, which is not where a reader can reach it:
+        127.0.0.1 works only on the machine itself and 0.0.0.0 is not an address at all.
+        Set DASHBOARD_URL to the address that actually opens, such as a Tailscale one.
+        """
+        configured = (self.dashboard_url or "").strip()
+        if configured:
+            return configured.rstrip("/")
+
+        host = self.web_host if self.web_host not in ("0.0.0.0", "::", "") else "127.0.0.1"
+        return f"http://{host}:{self.web_port}"
 
     @classmethod
     def load(cls) -> "Settings":
@@ -43,6 +59,7 @@ class Settings:
         discord_guild_id = int(guild_id_raw) if guild_id_raw and guild_id_raw.strip() else None
         web_host = os.getenv("WEB_HOST", "127.0.0.1")
         web_port = int(os.getenv("WEB_PORT", "8000"))
+        dashboard_url = os.getenv("DASHBOARD_URL")
 
         target_cals_raw = os.getenv("TARGET_CALORIES")
         target_calories = float(target_cals_raw) if target_cals_raw else None
@@ -61,6 +78,7 @@ class Settings:
             web_port=web_port,
             target_calories=target_calories,
             target_protein_g=target_protein_g,
+            dashboard_url=dashboard_url,
         )
 
     def require_gemini_api_key(self) -> str:

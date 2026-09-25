@@ -470,7 +470,7 @@ def test_bot_registers_expected_slash_commands(monkeypatch: pytest.MonkeyPatch):
     client, tree = bot_module.create_bot()
     command_names = {cmd.name for cmd in tree.get_commands()}
 
-    assert {"dnes", "vaha", "trenink", "prehled", "web"} <= command_names
+    assert {"dnes", "vaha", "trenink", "prehled", "vymaz", "web", "help"} <= command_names
 
     view = bot_module.build_dashboard_view()
     assert len(view.children) == 1
@@ -478,6 +478,81 @@ def test_bot_registers_expected_slash_commands(monkeypatch: pytest.MonkeyPatch):
     assert isinstance(button, discord.ui.Button)
     assert button.style == discord.ButtonStyle.link
     assert button.url.startswith("http://")
+
+
+def test_help_lists_every_registered_command(monkeypatch: pytest.MonkeyPatch):
+    """'/help' must list the commands that are actually registered."""
+
+    import asyncio
+
+    import nutrition_agent.bot as bot_module
+
+    client, tree = bot_module.create_bot()
+    help_command = next(cmd for cmd in tree.get_commands() if cmd.name == "help")
+
+    class FakeResponse:
+        def __init__(self) -> None:
+            self.content = ""
+            self.ephemeral = False
+
+        async def send_message(self, content: str, ephemeral: bool = False) -> None:
+            self.content = content
+            self.ephemeral = ephemeral
+
+    class FakeInteraction:
+        def __init__(self) -> None:
+            self.response = FakeResponse()
+
+    interaction = FakeInteraction()
+    asyncio.run(help_command.callback(interaction))
+
+    text = interaction.response.content
+    for name in ("dnes", "vaha", "trenink", "prehled", "vymaz", "web", "help"):
+        assert f"**/{name}**" in text, name
+    # Only the caller needs the list, so it must not be posted to the channel.
+    assert interaction.response.ephemeral is True
+
+
+def test_dashboard_link_uses_the_configured_address(monkeypatch: pytest.MonkeyPatch):
+    """Links must point where the dashboard is actually reachable, not where it binds."""
+    import nutrition_agent.bot as bot_module
+    from nutrition_agent.config import Settings
+
+    bound = Settings(
+        database_path="data/nutrition.db",
+        foods_data_path="data/foods.json",
+        log_level="INFO",
+        gemini_api_key=None,
+        web_host="0.0.0.0",
+        web_port=8000,
+    )
+    # A server bound to every interface still has no address of its own to hand out.
+    assert bound.dashboard_link == "http://127.0.0.1:8000"
+
+    configured = Settings(
+        database_path="data/nutrition.db",
+        foods_data_path="data/foods.json",
+        log_level="INFO",
+        gemini_api_key=None,
+        web_host="0.0.0.0",
+        web_port=8000,
+        dashboard_url="http://100.118.153.122:8000/",
+    )
+    assert configured.dashboard_link == "http://100.118.153.122:8000"
+
+    monkeypatch.setattr(
+        bot_module,
+        "settings",
+        type(bot_module.settings)(
+            database_path=bot_module.settings.database_path,
+            foods_data_path=bot_module.settings.foods_data_path,
+            log_level="WARNING",
+            gemini_api_key=None,
+            dashboard_url="http://100.118.153.122:8000",
+        ),
+    )
+    client, _ = bot_module.create_bot()
+    assert bot_module.build_dashboard_view().children[0].url == "http://100.118.153.122:8000"
 
 
 def test_bot_message_content_intent_is_enabled(monkeypatch: pytest.MonkeyPatch):

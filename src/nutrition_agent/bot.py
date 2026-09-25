@@ -58,7 +58,7 @@ def _names(synced: list[app_commands.AppCommand]) -> str:
 def build_dashboard_view() -> discord.ui.View:
     """Build persistent Discord UI button opening the web dashboard."""
     view = discord.ui.View()
-    web_url = f"http://{settings.web_host}:{settings.web_port}"
+    web_url = settings.dashboard_link
     button = discord.ui.Button(
         label="Otevřít webový dashboard",
         url=web_url,
@@ -174,7 +174,7 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
                 color=color,
                 timestamp=datetime.now(),
             )
-            embed.set_footer(text=f"Web dashboard: http://{settings.web_host}:{settings.web_port}")
+            embed.set_footer(text=f"Web dashboard: {settings.dashboard_link}")
             await message.channel.send(embed=embed, view=build_dashboard_view())
         finally:
             conn.close()
@@ -255,7 +255,7 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
                 inline=False,
             )
             embed.add_field(name="Dnešní jídla", value=meals_text, inline=False)
-            embed.set_footer(text=f"Web dashboard: http://{settings.web_host}:{settings.web_port}")
+            embed.set_footer(text=f"Web dashboard: {settings.dashboard_link}")
 
             await interaction.response.send_message(embed=embed, view=build_dashboard_view())
         finally:
@@ -381,13 +381,27 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
 
     @tree.command(name="web", description="Přímý odkaz na webový dashboard")
     async def cmd_web(interaction: discord.Interaction):
-        web_url = f"http://{settings.web_host}:{settings.web_port}"
+        web_url = settings.dashboard_link
         embed = discord.Embed(
             title="Webový dashboard",
             description=f"Otevřete webový dashboard na adrese:\n<{web_url}>",
             color=discord.Color.gold(),
         )
         await interaction.response.send_message(embed=embed, view=build_dashboard_view())
+
+    @tree.command(name="help", description="Vypíše všechny příkazy a co dělají")
+    async def cmd_help(interaction: discord.Interaction):
+        # Read from the command tree so the list cannot drift from what is registered.
+        lines = [
+            f"**/{command.name}** - {command.description}"
+            for command in sorted(tree.get_commands(), key=lambda item: item.name)
+        ]
+        lines.append("")
+        lines.append(
+            "Jídlo, váhu i příkazy `den trenink`, `dnes`, `tyden` nebo `cil cut` můžeš "
+            "napsat i jako běžnou zprávu do kanálu nebo do soukromé zprávy."
+        )
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
     return client, tree
 

@@ -34,11 +34,16 @@ def test_compose_keeps_the_container_timezone_settable():
     assert "tzdata" in dockerfile
 
 
-def test_compose_binds_the_dashboard_to_localhost():
-    """The dashboard has no authentication, so it must not be published on every interface."""
+def test_compose_binds_the_dashboard_to_localhost_by_default():
+    """The dashboard has no authentication, so it is not published on every interface.
+
+    The bind address stays configurable because the dashboard is also opened from other
+    devices over Tailscale; DASHBOARD_URL then has to name the same address, otherwise
+    the links the bot posts point somewhere unreachable.
+    """
     compose = COMPOSE_FILE.read_text(encoding="utf-8")
 
-    assert '"127.0.0.1:8000:8000"' in compose
+    assert '"${WEB_BIND:-127.0.0.1}:8000:8000"' in compose
     assert "restart: unless-stopped" in compose
 
 

@@ -107,7 +107,7 @@ Co je potřeba vědět:
 - **Migrace ze starého stroje.** Zkopíruj `data/nutrition.db` a `data/foods.json` do `./data` na novém stroji ještě před prvním spuštěním.
 - **Zóna.** SQLite počítá hranici dne podle místního času, proto kontejner dostává `TZ` (výchozí `Europe/Prague`). Když bys byl v jiné zóně, nastav `TZ` v prostředí před `docker compose up`.
 - **Práva k souborům.** Kontejner běží jako uživatel s uid 1000, což na Linux Mintu odpovídá prvnímu uživateli. Když `id -u` vrátí jiné číslo, spusť `PUID=$(id -u) PGID=$(id -g) docker compose up -d --build`. Složka `data/` musí na hostu existovat a patřit tobě — jinak ji Docker založí jako root a zápis do databáze spadne.
-- **Port je jen na localhostu.** Dashboard nemá přihlašování. Když ho chceš vystavit na LAN, přepiš v `docker-compose.yml` mapování na `"8000:8000"` a počítej s tím, že kdokoli na síti může záznamy číst i měnit.
+- **Port je jen na localhostu.** Dashboard nemá přihlašování. Pro přístup z telefonu nebo přes Tailscale nastav `WEB_BIND` na adresu, na které má poslouchat (třeba `WEB_BIND=100.118.153.122` nebo `0.0.0.0`), a `DASHBOARD_URL` na stejnou adresu, aby tam mířily i odkazy z bota.
 - **Jen bot bez webu.** Stačí v `docker-compose.yml` nahradit `command` za `["nutrition-agent", "--bot"]`. Healthcheck na dashboard pak hlásí `unhealthy`, takže ho zároveň vypni.
 
 Kontejner staví na `python:3.12-slim`, instaluje závislosti z `pyproject.toml` a běží pod běžným uživatelem. Ověření, že obraz funguje, dělá healthcheck na `/api/version`.
@@ -266,6 +266,9 @@ Zpráva v DM nebo ve vyhrazeném kanálu (např. `200g kuřecích prsou a 150g r
 | `/prehled <obdobi>` | Textová tabulka za období (`tyden`, `mesic`, `pulrok`, `rok`, `vse`). |
 | `/vymaz [datum]` | Smaže všechny záznamy za den (`dnes`, `vcera` nebo `RRRR-MM-DD`). Před smazáním zobrazí, co se odstraní, a vyžádá potvrzení tlačítkem. |
 | `/web` | Přímý odkaz na webový dashboard. |
+| `/help` | Vypíše všechny příkazy s popisem; vidíš ho jen ty. |
+
+Odkazy na dashboard se berou z `DASHBOARD_URL` v `.env`. Bez ní se použije `WEB_HOST:WEB_PORT`, což pro telefon nefunguje — výchozí `127.0.0.1` je jen ten stroj sám. Když se na dashboard dostáváš přes Tailscale nebo z jiného zařízení, nastav `DASHBOARD_URL` na adresu, která se opravdu otevře (např. `http://100.118.153.122:8000`).
 
 Progress bary v Discordu používají Unicode bloky:
 ```text

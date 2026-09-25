@@ -21,9 +21,10 @@ services:
       # SQLite decides the day boundary with local time, so the zone has to be yours.
       TZ: ${TZ:-Europe/Prague}
     ports:
-      # Localhost only: the dashboard has no authentication. Use "8000:8000" to expose it
-      # on the LAN, knowing anyone on the network can then read and edit your records.
-      - "127.0.0.1:8000:8000"
+      # Localhost only by default: the dashboard has no authentication. Set WEB_BIND to
+      # 0.0.0.0 or to a Tailscale address to open it from other devices, and point
+      # DASHBOARD_URL at that same address so the links the bot posts work there.
+      - "${WEB_BIND:-127.0.0.1}:8000:8000"
     volumes:
       # Database, curated catalog and learned conversions live on the host, so rebuilding
       # or replacing the container never loses data.
