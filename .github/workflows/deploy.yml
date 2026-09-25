@@ -52,10 +52,21 @@ jobs:
           docker image prune -f || true
 
       - name: Wait for the dashboard
+        env:
+          PROJECT_DIR: ${{ vars.PROJECT_DIR }}
         run: |
           set -euo pipefail
+          target="${PROJECT_DIR:-$HOME/diet-agent}"
+          cd "$target"
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/api/version; then
+            # Asked inside the container on purpose: there the server always listens on
+            # 127.0.0.1:8000, while on the host the port may be published on one specific
+            # address only (a Tailscale address, for instance).
+            if docker exec nutrition-agent python -c \
+              "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/version', timeout=5)"; then
+              echo
+              echo "Kontejner odpovídá. Port je publikovaný jako:"
+              docker compose port nutrition-agent 8000 || true
               exit 0
             fi
             sleep 2

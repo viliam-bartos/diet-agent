@@ -126,6 +126,8 @@ Workflow používá proměnnou `PROJECT_DIR`, a proto potřebuje jen čtení rep
 
 Klon na stroji musí být čistý — deploy dělá `git pull --ff-only`, takže necommitnuté změny v `docker-compose.yml` ho zastaví. Všechno, co se v nasazeném prostředí liší (port, adresa, zóna, uid), patří do `.env`: compose z něj čte `WEB_BIND`, `DASHBOARD_URL`, `TZ`, `PUID` i `PGID`. Když pull kvůli změnám spadne, jobs to vypíše i s cestou k souboru; hodnoty přenes do `.env` a změny v klonu zahoď (`git checkout -- docker-compose.yml`).
 
+Kontrola po nasazení se ptá **uvnitř kontejneru**, kde server vždy poslouchá na `127.0.0.1:8000`. Na hostu může být port publikovaný jen na jedné adrese (`WEB_BIND=100.118.153.122`), a takový dotaz z localhostu by neprošel. Která adresa je publikovaná, job na konci vypíše.
+
 Tři věci, které stojí za pozornost:
 
 - Job se rozjede jen ve chvíli, kdy je stroj zapnutý a služba runneru běží. Když je offline, zůstane ve frontě a doběhne po připojení.
