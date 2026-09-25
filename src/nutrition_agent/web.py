@@ -24,6 +24,7 @@ from nutrition_agent.nutrition import (
     apply_manual_macros,
     complete_manual_macros,
     per_100g_from_portion,
+    per_portion_from_100g,
     recalculate_food_log,
     validate_body_weight,
 )
@@ -55,7 +56,7 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 # literal in its template and compares it with the value the server reports. A process
 # started before the change serves the new template from disk while still running the
 # old code, and the version string alone does not give that away.
-API_LEVEL: int = 3
+API_LEVEL: int = 4
 
 RecordType = Literal["food", "weight", "workout"]
 
@@ -73,18 +74,19 @@ class MessagePayload(BaseModel):
 class FoodLogEdit(BaseModel):
     """Editable fields of a stored food log.
 
-    Macros are optional as a group: without them the log is recomputed from the food
-    catalog. One of the four may be left out and is derived from the energy balance;
-    three typed numbers are therefore enough.
+    Macros are typed per 100 g of the raw food, the same basis the catalog uses, so the
+    numbers can be compared with a package label and written to the catalog unchanged.
+    Without them the log is recomputed from the catalog. One of the four may be left out
+    and is derived from the energy balance.
     """
 
     amount_g: float
     state: Literal["raw", "cooked"] = "raw"
-    calories: float | None = None
-    protein_usable: float | None = None
-    carbs: float | None = None
-    fats: float | None = None
-    alcohol: float | None = None
+    calories_per_100g: float | None = None
+    protein_usable_per_100g: float | None = None
+    carbs_per_100g: float | None = None
+    fats_per_100g: float | None = None
+    alcohol_per_100g: float | None = None
     update_catalog: bool = False
 
     @field_validator("amount_g")
@@ -95,7 +97,13 @@ class FoodLogEdit(BaseModel):
             raise ValueError("Hmotnost musí být kladné číslo.")
         return value
 
-    @field_validator("calories", "protein_usable", "carbs", "fats", "alcohol")
+    @field_validator(
+        "calories_per_100g",
+        "protein_usable_per_100g",
+        "carbs_per_100g",
+        "fats_per_100g",
+        "alcohol_per_100g",
+    )
     @classmethod
     def validate_non_negative(cls, value: float | None) -> float | None:
         """Nutrition values are never negative (Fail Fast)."""
@@ -117,8 +125,13 @@ class FoodLogEdit(BaseModel):
 
     @property
     def macros(self) -> tuple[float | None, float | None, float | None, float | None]:
-        """The four energy-carrying numbers of the payload."""
-        return (self.calories, self.protein_usable, self.carbs, self.fats)
+        """The four energy-carrying numbers of the payload, per 100 g."""
+        return (
+            self.calories_per_100g,
+            self.protein_usable_per_100g,
+            self.carbs_per_100g,
+            self.fats_per_100g,
+        )
 
     @property
     def macros_provided(self) -> bool:
@@ -316,27 +329,37 @@ def _update_food_record(conn, record_id: int, edit: FoodLogEdit) -> dict[str, ob
         )
 
     if edit.macros_provided:
+        stored_alcohol_per_100g = per_100g_from_portion(
+            existing.alcohol, existing.amount_g, existing.state, food_def.name
+        )
+        alcohol_per_100g = (
+            stored_alcohol_per_100g if edit.alcohol_per_100g is None else edit.alcohol_per_100g
+        )
+
         try:
-            macros = complete_manual_macros(
-                edit.calories,
-                edit.protein_usable,
-                edit.carbs,
-                edit.fats,
-                alcohol=existing.alcohol,
+            per_100g = complete_manual_macros(
+                edit.calories_per_100g,
+                edit.protein_usable_per_100g,
+                edit.carbs_per_100g,
+                edit.fats_per_100g,
+                alcohol=alcohol_per_100g,
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        def per_portion(value: float) -> float:
+            return per_portion_from_100g(value, edit.amount_g, edit.state, food_def.name)
 
         updated = apply_manual_macros(
             existing,
             food_def,
             edit.amount_g,
             edit.state,
-            calories=macros.calories,
-            protein_usable=macros.protein_usable,
-            carbs=macros.carbs,
-            fats=macros.fats,
-            alcohol=edit.alcohol,
+            calories=per_portion(per_100g.calories),
+            protein_usable=per_portion(per_100g.protein_usable),
+            carbs=per_portion(per_100g.carbs),
+            fats=per_portion(per_100g.fats),
+            alcohol=per_portion(alcohol_per_100g),
         )
     else:
         updated = recalculate_food_log(existing, food_def, edit.amount_g, edit.state)
@@ -364,7 +387,11 @@ def _store_catalog_correction(
     food_def: FoodDefinition,
     log: CalculatedFoodLog,
 ) -> None:
-    """Write the corrected log values back to the catalog, scaled to 100 g."""
+    """Write the corrected log values back to the catalog, on its per-100 g basis.
+
+    The log stores the portion, the catalog the raw 100 g, so the values are divided by
+    the same raw equivalent the portion was scaled with.
+    """
 
     def per_100g(value: float) -> float:
         return per_100g_from_portion(value, log.amount_g, log.state, food_def.name)

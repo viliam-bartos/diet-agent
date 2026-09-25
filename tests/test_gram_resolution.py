@@ -109,6 +109,12 @@ def test_resolve_grams_refuses_when_model_fails(db: sqlite3.Connection, monkeypa
     assert get_unit_conversion(db, "zvláštní věc", "tabulka") is None
 
 
+# The fixture seeds the real catalog, so a test food must be a name that cannot be in
+# it: a name that is already curated would swallow the learned row and the deletion
+# would then remove the curated entry.
+TEST_FOOD = "testovací pomazánka"
+
+
 def test_handle_meal_with_household_measure(db: sqlite3.Connection):
     """'2 odměrky proteinu' resolves through the curated table end to end."""
     conn = db
@@ -130,13 +136,13 @@ def test_handle_meal_with_household_measure(db: sqlite3.Connection):
 
     result = handle_user_message("2 odměrky proteinu", load_foods(conn), conn, parse_fn=mock_parser)
 
-    assert "60 g" in result
+    assert "40 g" in result
     assert "odhad převodu" not in result
 
     cursor = conn.cursor()
     cursor.execute("SELECT amount_g, conversion_estimated FROM food_logs")
     row = cursor.fetchone()
-    assert row["amount_g"] == 60.0
+    assert row["amount_g"] == 40.0
     assert row["conversion_estimated"] == 0
 
 
@@ -191,21 +197,21 @@ def test_list_catalog_entries_filters_by_layer(db: sqlite3.Connection):
     save_learned_food(
         db,
         FoodDefinition(
-            name="marmeláda", calories=224.0, protein=0.4, carbs=59.0, fats=0.1, source="ai"
+            name=TEST_FOOD, calories=224.0, protein=0.4, carbs=59.0, fats=0.1, source="ai"
         ),
     )
 
     ai_list = list_catalog_entries(db, "ai")
-    assert "marmeláda" in ai_list
+    assert TEST_FOOD in ai_list
     assert "Kuřecí prsa" not in ai_list
 
     everything = list_catalog_entries(db, "")
-    assert "marmeláda" in everything
+    assert TEST_FOOD in everything
     assert "Kuřecí prsa" in everything
 
     curated_only = list_catalog_entries(db, "curated")
     assert "Kuřecí prsa" in curated_only
-    assert "marmeláda" not in curated_only
+    assert TEST_FOOD not in curated_only
 
 
 def test_list_catalog_entries_rejects_unknown_selector(db: sqlite3.Connection):
@@ -218,15 +224,15 @@ def test_delete_catalog_food_reports_result(db: sqlite3.Connection):
     save_learned_food(
         db,
         FoodDefinition(
-            name="marmeláda", calories=224.0, protein=0.4, carbs=59.0, fats=0.1, source="ai"
+            name=TEST_FOOD, calories=224.0, protein=0.4, carbs=59.0, fats=0.1, source="ai"
         ),
     )
 
-    result = delete_catalog_food(db, "marmeláda")
-    assert "Smazáno z katalogu: marmeláda" in result
-    assert get_food(db, "marmeláda") is None
+    result = delete_catalog_food(db, TEST_FOOD)
+    assert "Smazáno z katalogu: testovací pomazánka" in result
+    assert get_food(db, TEST_FOOD) is None
 
-    assert "není v katalogu" in delete_catalog_food(db, "marmeláda")
+    assert "není v katalogu" in delete_catalog_food(db, TEST_FOOD)
 
 
 def test_delete_catalog_food_warns_about_curated(db: sqlite3.Connection):
@@ -258,15 +264,15 @@ def test_message_handler_routes_management_commands(db: sqlite3.Connection):
     save_learned_food(
         db,
         FoodDefinition(
-            name="marmeláda", calories=224.0, protein=0.4, carbs=59.0, fats=0.1, source="ai"
+            name=TEST_FOOD, calories=224.0, protein=0.4, carbs=59.0, fats=0.1, source="ai"
         ),
     )
     foods = load_foods(db)
 
-    assert "marmeláda" in handle_user_message("jidla ai", foods, db)
+    assert TEST_FOOD in handle_user_message("jidla ai", foods, db)
     assert "Katalog potravin" in handle_user_message("jidla", foods, db)
-    assert "Smazáno z katalogu" in handle_user_message("jidla smaz marmeláda", foods, db)
-    assert get_food(db, "marmeláda") is None
+    assert "Smazáno z katalogu" in handle_user_message("jidla smaz testovací pomazánka", foods, db)
+    assert get_food(db, TEST_FOOD) is None
     assert "Převod uložen" in handle_user_message("prevod svíčková porce 350", foods, db)
     assert "Naučené převody" in handle_user_message("prevod", foods, db)
 

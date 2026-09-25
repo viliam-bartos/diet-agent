@@ -13,6 +13,7 @@ from nutrition_agent.models import (
     local_date,
     utc_now_iso,
 )
+from nutrition_agent.nutrition import per_100g_from_portion
 from nutrition_agent.targets import DayType, DietGoal, calculate_daily_targets
 
 # Day-scoped queries filter with date(logged_at, 'localtime') rather than a prefix
@@ -1153,6 +1154,11 @@ def get_day_detail(
     }
 
 
+def _per_100g_from_food_row(value: float, row: sqlite3.Row) -> float:
+    """Scale a stored portion value back to the per-100 g basis of the catalog."""
+    return per_100g_from_portion(value, row["amount_g"], row["state"], row["food_name_matched"])
+
+
 def get_unified_records(
     conn: sqlite3.Connection,
     record_type: str | None = None,
@@ -1178,6 +1184,7 @@ def get_unified_records(
             food_desc = (
                 f"{row['food_name_matched']} ({row['amount_g']:.0f} g, {row['state']}){ai_flag}"
             )
+
             records.append(
                 {
                     "type": "food",
@@ -1193,6 +1200,12 @@ def get_unified_records(
                     "protein_usable": row["protein_usable"],
                     "carbs": row["carbs"],
                     "fats": row["fats"],
+                    # The edit dialog works on the catalog basis, so it needs the values
+                    # the portion was calculated from, not the portion itself.
+                    "calories_per_100g": _per_100g_from_food_row(row["calories"], row),
+                    "protein_usable_per_100g": _per_100g_from_food_row(row["protein_usable"], row),
+                    "carbs_per_100g": _per_100g_from_food_row(row["carbs"], row),
+                    "fats_per_100g": _per_100g_from_food_row(row["fats"], row),
                     "amount_g": row["amount_g"],
                     "state": row["state"],
                     "nutrition_source": row["nutrition_source"],

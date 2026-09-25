@@ -564,6 +564,19 @@ def per_100g_from_portion(value: float, amount_g: float, state: str, food_name: 
     return round(value * 100.0 / (amount_g * ratio), 2)
 
 
+def per_portion_from_100g(value: float, amount_g: float, state: str, food_name: str) -> float:
+    """Scale a per-100 g catalog value down to the logged portion.
+
+    The inverse of per_100g_from_portion: cooked grams stand for less raw food, so a
+    portion carries the value of its raw equivalent weight.
+    """
+    if amount_g <= 0:
+        raise ValueError("Hmotnost potraviny musí být kladné číslo.")
+
+    ratio = get_cooked_to_raw_ratio(food_name) if state == "cooked" else 1.0
+    return round(value * amount_g * ratio / 100.0, 2)
+
+
 def build_food_from_estimate(estimate: EstimatedFoodNutrition) -> FoodDefinition:
     """Turn an LLM nutrition estimate into a food definition flagged as AI-sourced."""
     if estimate.calories <= 0 and estimate.protein <= 0 and estimate.carbs <= 0:

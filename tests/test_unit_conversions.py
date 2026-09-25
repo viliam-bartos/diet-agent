@@ -19,6 +19,11 @@ from nutrition_agent.repository import (
 
 CATALOG_JSON = "data/foods.json"
 
+# The fixture seeds the real catalog, so a test food must be a name that cannot be in
+# it: a name that is already curated would swallow the learned row and the deletion
+# would then remove the curated entry.
+TEST_FOOD = "testovací pomazánka"
+
 
 @pytest.fixture
 def db() -> sqlite3.Connection:
@@ -79,8 +84,8 @@ def test_conversion_rejects_non_positive_amount():
 
 def test_estimated_unit_conversion_validation():
     """The estimate schema rejects impossible weights but allows 'unknown'."""
-    valid = EstimatedUnitConversion(name="protein", unit="odměrka", grams_per_unit=30.0)
-    assert valid.grams_per_unit == 30.0
+    valid = EstimatedUnitConversion(name="protein", unit="odměrka", grams_per_unit=20.0)
+    assert valid.grams_per_unit == 20.0
 
     # Zero is the documented way for the model to say it does not know
     unknown = EstimatedUnitConversion(name="x", unit="tabulka", grams_per_unit=0.0)
@@ -135,7 +140,7 @@ def test_delete_food_removes_food_and_its_conversions(db: sqlite3.Connection):
     save_learned_food(
         db,
         FoodDefinition(
-            name="marmeláda",
+            name=TEST_FOOD,
             calories=224.0,
             protein=0.4,
             carbs=59.0,
@@ -143,14 +148,15 @@ def test_delete_food_removes_food_and_its_conversions(db: sqlite3.Connection):
             source="ai",
         ),
     )
-    save_unit_conversion(db, "marmeláda", "lžíce", 20.0)
+    save_unit_conversion(db, TEST_FOOD, "lžíce", 20.0)
 
     from nutrition_agent.repository import delete_food
 
-    removed = delete_food(db, "MARMELÁDA")
-    assert removed.name == "marmeláda"
-    assert get_food(db, "marmeláda") is None
-    assert get_unit_conversion(db, "marmeláda", "lžíce") is None
+    # Case and diacritics must not matter when the row is looked up for deletion.
+    removed = delete_food(db, TEST_FOOD.upper())
+    assert removed.name == TEST_FOOD
+    assert get_food(db, TEST_FOOD) is None
+    assert get_unit_conversion(db, TEST_FOOD, "lžíce") is None
 
 
 def test_delete_unknown_food_fails_fast(db: sqlite3.Connection):
@@ -168,7 +174,7 @@ def test_list_foods_by_source(db: sqlite3.Connection):
     save_learned_food(
         db,
         FoodDefinition(
-            name="marmeláda",
+            name=TEST_FOOD,
             calories=224.0,
             protein=0.4,
             carbs=59.0,
@@ -177,7 +183,7 @@ def test_list_foods_by_source(db: sqlite3.Connection):
         ),
     )
 
-    assert [f.name for f in list_foods_by_source(db, "ai")] == ["marmeláda"]
+    assert [f.name for f in list_foods_by_source(db, "ai")] == [TEST_FOOD]
     assert all(f.source == "curated" for f in list_foods_by_source(db, "curated"))
     assert len(list_foods_by_source(db, "curated")) == len(load_foods(db)) - 1
 

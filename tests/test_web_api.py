@@ -234,16 +234,42 @@ def test_dashboard_weight_chart_avoids_a_scatter_dataset(api_client: TestClient)
     assert "label: '7denní klouzavý průměr'" in chart_config
 
 
-def test_dashboard_food_dialog_offers_macro_fields(api_client: TestClient):
+def test_dashboard_calendar_offsets_the_weekday_column(api_client: TestClient):
+    """The weekday labels must sit beside the first row of cells, not beside the months.
+
+    The month row is drawn above the grid inside the same column, so the weekday column
+    needs an offset of exactly that row. Without it 'Po' lined up with the month names
+    and every label was one row off.
+
+    This is a proxy check: it reads the template rather than measuring a rendered page.
+    """
+    body = api_client.get("/").text
+
+    months = body[body.index(".heatmap-months {") : body.index(".heatmap-month {")]
+    weekdays = body[body.index(".heatmap-weekdays {") : body.index(".heatmap-weekdays span")]
+
+    assert "height: 14px;" in months
+    assert "margin-bottom: 5px;" in months
+    assert "padding-top: 19px;" in weekdays
+
+
+def test_dashboard_food_dialog_edits_values_per_100g(api_client: TestClient):
     """The food edit dialog carries the macro inputs and the catalog option.
 
-    This is a proxy check: it reads the template instead of running a browser. It
-    guards the wiring the manual correction depends on, not the numbers.
+    The fields are per 100 g, the basis of the catalog and of a package label, so the
+    same numbers can go straight into the catalog.
+
+    This is a proxy check: it reads the template instead of running a browser. It guards
+    the wiring the manual correction depends on, not the numbers.
     """
     body = api_client.get("/").text
 
     for field in ("editCalories", "editProtein", "editCarbs", "editFats", "editCatalog"):
         assert f'id="{field}"' in body, field
+
+    assert "kcal / 100 g" in body
+    assert "record.calories_per_100g" in body
+    assert "payload.calories_per_100g" in body
 
     # Macros are sent only after the user retypes one, otherwise the server recomputes.
     assert "let macrosDirty = false;" in body
@@ -252,7 +278,7 @@ def test_dashboard_food_dialog_offers_macro_fields(api_client: TestClient):
 
     # Leaving one field empty derives it from the other three, so the dialog says so.
     assert 'placeholder="dopočítám"' in body
-    assert "Nech prázdné právě jedno pole" in body
+    assert "Nech prázdné právě jedno" in body
 
 
 def test_dashboard_has_no_decorative_subtitles(api_client: TestClient):

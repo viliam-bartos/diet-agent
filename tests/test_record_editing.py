@@ -379,8 +379,12 @@ def test_api_records_expose_editable_fields(edit_client):
     assert "notes" in by_type["workout"]
 
 
-def test_api_patch_food_stores_manually_typed_macros(edit_client):
-    """Typed macros are stored as they are, not recomputed from the catalog."""
+def test_api_patch_food_stores_macros_typed_per_100g(edit_client):
+    """Typed values are per 100 g and scale to the logged portion.
+
+    The dialog works on the catalog basis, so 150 kcal per 100 g over a 200 g portion has
+    to end up as 300 kcal in the log.
+    """
     client, ids = edit_client
 
     response = client.patch(
@@ -388,10 +392,10 @@ def test_api_patch_food_stores_manually_typed_macros(edit_client):
         json={
             "amount_g": 200.0,
             "state": "raw",
-            "calories": 300.0,
-            "protein_usable": 40.0,
-            "carbs": 5.0,
-            "fats": 10.0,
+            "calories_per_100g": 150.0,
+            "protein_usable_per_100g": 20.0,
+            "carbs_per_100g": 2.5,
+            "fats_per_100g": 5.0,
         },
     )
     assert response.status_code == 200
@@ -405,6 +409,33 @@ def test_api_patch_food_stores_manually_typed_macros(edit_client):
     listed = client.get("/api/records", params={"type": "food"}).json()["items"][0]
     assert "300.0 kcal" in listed["subtitle"]
     assert listed["nutrition_source"] == "manual"
+    # The dialog is fed back the same per-100 g numbers it wrote.
+    assert listed["calories_per_100g"] == 150.0
+    assert listed["protein_usable_per_100g"] == 20.0
+    assert listed["carbs_per_100g"] == 2.5
+    assert listed["fats_per_100g"] == 5.0
+
+
+def test_api_patch_food_scales_per_100g_values_for_the_portion(edit_client):
+    """Half the weight carries half the values, without touching the 100 g numbers."""
+    client, ids = edit_client
+
+    response = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={
+            "amount_g": 50.0,
+            "state": "raw",
+            "calories_per_100g": 150.0,
+            "protein_usable_per_100g": 20.0,
+            "carbs_per_100g": 2.5,
+            "fats_per_100g": 5.0,
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["calories"] == 75.0
+    assert body["protein_usable"] == 10.0
+    assert body["fats"] == 2.5
 
 
 def test_api_patch_food_keeps_the_amount_edit_recomputing(edit_client):
@@ -421,7 +452,7 @@ def test_api_patch_food_keeps_the_amount_edit_recomputing(edit_client):
 
 
 def test_api_patch_food_keeps_stored_alcohol(edit_client, record_db):
-    """Alcohol is not in the dialog, so a macro correction must not drop it."""
+    """Alcohol is not in the dialog, so it is kept per 100 g and scaled like the rest."""
     client, ids = edit_client
     conn, _ = record_db
     conn.execute("UPDATE food_logs SET alcohol = 20.0 WHERE id = ?", (ids["food"],))
@@ -431,10 +462,10 @@ def test_api_patch_food_keeps_stored_alcohol(edit_client, record_db):
         f"/api/records/food/{ids['food']}",
         json={
             "amount_g": 200.0,
-            "calories": 300.0,
-            "protein_usable": 40.0,
-            "carbs": 5.0,
-            "fats": 10.0,
+            "calories_per_100g": 150.0,
+            "protein_usable_per_100g": 20.0,
+            "carbs_per_100g": 2.5,
+            "fats_per_100g": 5.0,
         },
     )
     assert response.status_code == 200
@@ -443,9 +474,26 @@ def test_api_patch_food_keeps_stored_alcohol(edit_client, record_db):
     assert stored is not None
     assert stored.alcohol == 20.0
 
+    # Doubling the weight doubles the ethanol of the portion as well.
+    doubled = client.patch(
+        f"/api/records/food/{ids['food']}",
+        json={
+            "amount_g": 400.0,
+            "calories_per_100g": 150.0,
+            "protein_usable_per_100g": 20.0,
+            "carbs_per_100g": 2.5,
+            "fats_per_100g": 5.0,
+        },
+    )
+    assert doubled.status_code == 200
+
+    stored = get_food_log(conn, ids["food"])
+    assert stored is not None
+    assert stored.alcohol == 40.0
+
 
 def test_api_patch_food_can_correct_the_catalog(edit_client, record_db):
-    """The correction can be written back to the catalog, scaled to 100 g."""
+    """The typed per-100 g values are the catalog values, so they are written as they are."""
     from nutrition_agent.repository import get_food
 
     client, ids = edit_client
@@ -456,10 +504,10 @@ def test_api_patch_food_can_correct_the_catalog(edit_client, record_db):
         json={
             "amount_g": 200.0,
             "state": "raw",
-            "calories": 300.0,
-            "protein_usable": 40.0,
-            "carbs": 5.0,
-            "fats": 10.0,
+            "calories_per_100g": 150.0,
+            "protein_usable_per_100g": 20.0,
+            "carbs_per_100g": 2.5,
+            "fats_per_100g": 5.0,
             "update_catalog": True,
         },
     )
@@ -470,6 +518,7 @@ def test_api_patch_food_can_correct_the_catalog(edit_client, record_db):
     assert corrected is not None
     assert corrected.calories == 150.0
     assert corrected.protein == 20.0
+    assert corrected.carbs == 2.5
     assert corrected.fats == 5.0
 
     # A later amount edit now uses the corrected catalog values.
@@ -481,22 +530,21 @@ def test_api_patch_food_can_correct_the_catalog(edit_client, record_db):
 
 
 def test_api_patch_food_catalog_correction_of_a_cooked_portion(edit_client, record_db):
-    """Cooked grams are converted back to the raw basis before the catalog write."""
+    """A cooked portion uses the same per-100 g basis, so the catalog is not rescaled."""
     from nutrition_agent.repository import get_food
 
     client, ids = edit_client
     conn, _ = record_db
 
-    # 200 g cooked chicken is 250 g raw equivalent, so 100 g raw carries 40% of it.
     response = client.patch(
         f"/api/records/food/{ids['food']}",
         json={
             "amount_g": 200.0,
             "state": "cooked",
-            "calories": 500.0,
-            "protein_usable": 50.0,
-            "carbs": 10.0,
-            "fats": 20.0,
+            "calories_per_100g": 120.0,
+            "protein_usable_per_100g": 25.0,
+            "carbs_per_100g": 1.0,
+            "fats_per_100g": 2.0,
             "update_catalog": True,
         },
     )
@@ -504,18 +552,41 @@ def test_api_patch_food_catalog_correction_of_a_cooked_portion(edit_client, reco
 
     corrected = get_food(conn, "Kuřecí prsa")
     assert corrected is not None
-    assert corrected.calories == 200.0
-    assert corrected.protein == 20.0
+    assert corrected.calories == 120.0
+    assert corrected.protein == 25.0
+
+    # 200 g cooked is 250 g raw equivalent, so the portion holds 2.5x the 100 g values.
+    stored = get_food_log(conn, ids["food"])
+    assert stored is not None
+    assert stored.calories == 300.0
+    assert stored.protein_usable == 62.5
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"amount_g": 200.0, "calories": 300.0},
-        {"amount_g": 200.0, "protein_usable": 10.0},
-        {"amount_g": 200.0, "calories": -1.0, "protein_usable": 1.0, "carbs": 1.0, "fats": 1.0},
-        {"amount_g": 200.0, "calories": 0, "protein_usable": 0, "carbs": 0, "fats": 0},
-        {"amount_g": 200.0, "calories": 0, "protein_usable": 0, "carbs": 0},
+        {"amount_g": 200.0, "calories_per_100g": 150.0},
+        {"amount_g": 200.0, "protein_usable_per_100g": 10.0},
+        {
+            "amount_g": 200.0,
+            "calories_per_100g": -1.0,
+            "protein_usable_per_100g": 1.0,
+            "carbs_per_100g": 1.0,
+            "fats_per_100g": 1.0,
+        },
+        {
+            "amount_g": 200.0,
+            "calories_per_100g": 0,
+            "protein_usable_per_100g": 0,
+            "carbs_per_100g": 0,
+            "fats_per_100g": 0,
+        },
+        {
+            "amount_g": 200.0,
+            "calories_per_100g": 0,
+            "protein_usable_per_100g": 0,
+            "carbs_per_100g": 0,
+        },
         {"amount_g": 200.0, "update_catalog": True},
     ],
 )
@@ -531,10 +602,26 @@ def test_api_patch_food_rejects_incomplete_manual_macros(edit_client, payload: d
 @pytest.mark.parametrize(
     ("payload", "missing_key", "expected"),
     [
-        ({"calories": 300.0, "protein_usable": 20.0, "carbs": 10.0}, "fats", 20.0),
-        ({"calories": 300.0, "protein_usable": 20.0, "fats": 20.0}, "carbs", 10.0),
-        ({"calories": 300.0, "carbs": 10.0, "fats": 20.0}, "protein_usable", 20.0),
-        ({"protein_usable": 20.0, "carbs": 10.0, "fats": 20.0}, "calories", 300.0),
+        (
+            {"calories_per_100g": 150.0, "protein_usable_per_100g": 20.0, "carbs_per_100g": 10.0},
+            "fats",
+            3.33,
+        ),
+        (
+            {"calories_per_100g": 150.0, "protein_usable_per_100g": 20.0, "fats_per_100g": 5.0},
+            "carbs",
+            6.25,
+        ),
+        (
+            {"calories_per_100g": 150.0, "carbs_per_100g": 10.0, "fats_per_100g": 5.0},
+            "protein_usable",
+            16.25,
+        ),
+        (
+            {"protein_usable_per_100g": 20.0, "carbs_per_100g": 10.0, "fats_per_100g": 5.0},
+            "calories",
+            165.0,
+        ),
     ],
 )
 def test_api_patch_food_derives_the_missing_macro(
@@ -549,15 +636,13 @@ def test_api_patch_food_derives_the_missing_macro(
     )
     assert response.status_code == 200
     body = response.json()
-    assert body[missing_key] == expected
     assert body["nutrition_source"] == "manual"
 
-    # Everything typed is stored unchanged.
-    for key, value in payload.items():
-        assert body[key] == value
+    # The missing value shows up in the log scaled to the portion, 2x for 200 g.
+    assert body[missing_key] == round(expected * 2, 2)
 
     listed = client.get("/api/records", params={"type": "food"}).json()["items"][0]
-    assert listed[missing_key] == expected
+    assert listed[f"{missing_key}_per_100g"] == expected
 
 
 def test_api_patch_food_derives_fat_net_of_stored_alcohol(edit_client, record_db):
@@ -567,13 +652,19 @@ def test_api_patch_food_derives_fat_net_of_stored_alcohol(edit_client, record_db
     conn.execute("UPDATE food_logs SET alcohol = 4.0 WHERE id = ?", (ids["food"],))
     conn.commit()
 
-    # 100 - 2 (protein) - 14 (carbs) - 28 (alcohol) = 56 kcal left for fat.
+    # Stored 4 g of ethanol over 200 g is 2 g per 100 g, so the balance leaves
+    # 100 - 2 (protein) - 14 (carbs) - 14 (alcohol) = 70 kcal for fat per 100 g.
     response = client.patch(
         f"/api/records/food/{ids['food']}",
-        json={"amount_g": 200.0, "calories": 100.0, "protein_usable": 0.5, "carbs": 3.5},
+        json={
+            "amount_g": 200.0,
+            "calories_per_100g": 100.0,
+            "protein_usable_per_100g": 0.5,
+            "carbs_per_100g": 3.5,
+        },
     )
     assert response.status_code == 200
-    assert response.json()["fats"] == 6.22
+    assert response.json()["fats"] == 15.56
 
 
 def test_api_patch_food_rejects_a_contradictory_correction(edit_client):
@@ -582,7 +673,12 @@ def test_api_patch_food_rejects_a_contradictory_correction(edit_client):
 
     response = client.patch(
         f"/api/records/food/{ids['food']}",
-        json={"amount_g": 200.0, "calories": 100.0, "protein_usable": 20.0, "carbs": 10.0},
+        json={
+            "amount_g": 200.0,
+            "calories_per_100g": 100.0,
+            "protein_usable_per_100g": 20.0,
+            "carbs_per_100g": 10.0,
+        },
     )
     assert response.status_code == 422
     assert "záporné tuky" in response.json()["detail"]
@@ -600,15 +696,15 @@ def test_api_patch_food_catalog_correction_uses_the_derived_value(edit_client, r
         json={
             "amount_g": 200.0,
             "state": "raw",
-            "calories": 300.0,
-            "protein_usable": 20.0,
-            "carbs": 10.0,
+            "calories_per_100g": 300.0,
+            "protein_usable_per_100g": 20.0,
+            "carbs_per_100g": 10.0,
             "update_catalog": True,
         },
     )
     assert response.status_code == 200
-    assert response.json()["fats"] == 20.0
+    assert response.json()["fats"] == 40.0
 
     corrected = get_food(conn, "Kuřecí prsa")
     assert corrected is not None
-    assert corrected.fats == 10.0  # 20 g per 200 g portion
+    assert corrected.fats == 20.0  # the derived value on the 100 g basis

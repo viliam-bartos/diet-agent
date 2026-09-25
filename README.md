@@ -288,7 +288,7 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 | `GET /api/weight-trend?days=` | Body jednotlivých vážení, 7denní klouzavý průměr a souhrnné hodnoty pro Chart.js. Výchozích 365 dní. |
 | `GET /api/heatmap?days=` | Adherence kalendář po dnech. Výchozích 365 dní. |
 | `GET /api/records?type=&limit=&offset=` | Stránkovaná a filtrovaná historie (jídla, váha, trénink). |
-| `PATCH /api/records/{typ}/{id}` | Úprava záznamu. U jídla se přepočítají makra z nové gramáže; pošleš-li aspoň tři z `calories`, `protein_usable`, `carbs`, `fats`, čtvrtá se dopočítá z energetické bilance a uloží se jako ruční korekce. `update_catalog: true` zapíše opravu i do katalogu, přepočtenou na 100 g. |
+| `PATCH /api/records/{typ}/{id}` | Úprava záznamu. U jídla se makra zadávají na 100 g (`calories_per_100g`, `protein_usable_per_100g`, `carbs_per_100g`, `fats_per_100g`), stejně jako v katalogu. Bez nich se záznam přepočítá z katalogu, s nimi se hodnoty přepočítají na zadanou gramáž a uloží jako ruční korekce. Aspoň tři hodnoty stačí, čtvrtá se dopočítá z energetické bilance. `update_catalog: true` zapíše stejná čísla i do katalogu. |
 | `DELETE /api/records/{typ}/{id}` | Smazání jednoho záznamu. |
 | `POST /api/message` | Zpracuje textovou zprávu stejnou pipeline jako CLI. Nepovinné `date` zapíše záznam na zvolený den. |
 
@@ -299,7 +299,7 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 - **Interaktivní graf váhy** (Chart.js): celý rok, osa Y se škáluje podle dat. Body jednotlivých vážení a spojitá čára 7denního klouzavého průměru.
 - **Adherence kalendář**: celý rok najednou, s popisky měsíců a dny v týdnu. Zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den. Dnešní den má oranžový rámeček.
 - **Panel dne**: kliknutím na den v kalendáři nebo v týdenním rozpisu se zobrazí jeho jídla a součty. Nahoře v poli pro záznam se pak píše na vybraný den, takže se dají jídla doplnit zpětně. Tlačítkem se výběr zruší.
-- **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění gramáž a stav, makra a kalorie se přepočítají z hodnot potraviny. Když některé makro v dialogu přepíšeš, uloží se zadaná čísla pro ten záznam (`manual`) a volitelně se stejná oprava zapíše i do katalogu na 100 g. Jedno pole můžeš nechat prázdné a dopočítá se z ostatních: energie = 4× bílkoviny + 4× sacharidy + 9× tuky + 7× alkohol. Když by zadaná čísla vyšla záporně, úprava se odmítne s vysvětlením. Alkohol se v dialogu needituje a zůstává beze změny.
+- **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění gramáž a stav a makra se zadávají **na 100 g**, tedy stejně jako v katalogu a na etiketě; na zadanou gramáž se přepočítají samy. Přepíšeš-li některé pole, uloží se jako ruční korekce (`manual`) a volitelně se stejná čísla zapíšou i do katalogu. Jedno pole můžeš nechat prázdné a dopočítá se z ostatních: energie = 4× bílkoviny + 4× sacharidy + 9× tuky + 7× alkohol. Když by zadaná čísla vyšla záporně, úprava se odmítne s vysvětlením. Alkohol se v dialogu needituje a zůstává beze změny.
 
 Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--aperture-cyan` s fonty Barlow Semi Condensed a Space Mono.
 
