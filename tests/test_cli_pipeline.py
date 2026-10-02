@@ -470,7 +470,7 @@ def test_handle_weight_log_recomputes_targets(
     # Both meals and the daily report must now use the 90 kg targets
     report = handle_user_message("dnes", foods, conn)
     assert "90.0 kg" in report
-    assert "3415" in report  # 90 kg * (3150 / 83) rounded
+    assert "3632" in report  # 90 kg * (3350 / 83), the lean bulk training target
 
 
 def _capture_service_call(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> dict[str, object]:

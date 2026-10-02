@@ -28,9 +28,10 @@ from nutrition_agent.repository import (
     update_workout_log,
 )
 from nutrition_agent.targets import DayType
+from tests.scratch import TEST_SCRATCH_ROOT
 
 # Sandbox restricts the OS temp directory, so test databases live in the workspace.
-TEST_TMP_ROOT = Path(__file__).resolve().parent.parent / ".tmp" / "tests"
+TEST_TMP_ROOT = TEST_SCRATCH_ROOT
 
 TODAY = datetime.now().strftime("%Y-%m-%d")
 

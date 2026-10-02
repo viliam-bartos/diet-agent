@@ -2,7 +2,6 @@
 
 import sqlite3
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pytest
 
@@ -23,6 +22,7 @@ from nutrition_agent.repository import (
     save_weight_log,
     save_workout_log,
 )
+from tests.scratch import TEST_SCRATCH_ROOT
 
 
 def _today() -> str:
@@ -34,7 +34,7 @@ def _yesterday() -> str:
 
 
 # Sandbox restricts the OS temp directory, so isolated test databases live in the workspace.
-TEST_DB_DIR = Path(__file__).resolve().parent.parent / ".tmp" / "tests"
+TEST_DB_DIR = TEST_SCRATCH_ROOT
 
 
 @pytest.fixture

@@ -950,6 +950,7 @@ def get_day_summaries(
 
     daily_calories: dict[str, float] = defaultdict(float)
     daily_protein: dict[str, float] = defaultdict(float)
+    daily_protein_total: dict[str, float] = defaultdict(float)
     daily_carbs: dict[str, float] = defaultdict(float)
     daily_fats: dict[str, float] = defaultdict(float)
 
@@ -957,6 +958,7 @@ def get_day_summaries(
         day = local_date(food.logged_at)
         daily_calories[day] += food.calories
         daily_protein[day] += food.protein_usable
+        daily_protein_total[day] += food.protein_raw
         daily_carbs[day] += food.carbs
         daily_fats[day] += food.fats
 
@@ -999,10 +1001,12 @@ def get_day_summaries(
                 "weekday": current.weekday(),
                 "calories": round(calories, 1),
                 "protein_usable": round(daily_protein.get(day, 0.0), 1),
+                "protein_total": round(daily_protein_total.get(day, 0.0), 1),
                 "carbs": round(daily_carbs.get(day, 0.0), 1),
                 "fats": round(daily_fats.get(day, 0.0), 1),
                 "target_calories": targets.calories,
                 "target_protein": targets.protein_usable,
+                "target_protein_total": targets.protein_total,
                 "target_carbs": targets.carbs,
                 "target_fats": targets.fats,
                 "day_type": day_type.value,
@@ -1099,7 +1103,9 @@ def get_week_summary(
     total_calories = sum(day["calories"] for day in logged_days)
     total_target = sum(day["target_calories"] for day in logged_days)
     total_protein = sum(day["protein_usable"] for day in logged_days)
+    total_protein_total = sum(day["protein_total"] for day in logged_days)
     total_target_protein = sum(day["target_protein"] for day in logged_days)
+    total_target_protein_total = sum(day["target_protein_total"] for day in logged_days)
 
     balance = total_calories - total_target
     return {
@@ -1112,7 +1118,9 @@ def get_week_summary(
         "avg_calories": round(total_calories / len(logged_days), 0) if logged_days else 0.0,
         "avg_target_calories": (round(total_target / len(logged_days), 0) if logged_days else 0.0),
         "total_protein": round(total_protein, 1),
+        "total_protein_total": round(total_protein_total, 1),
         "total_target_protein": round(total_target_protein, 1),
+        "total_target_protein_total": round(total_target_protein_total, 1),
         "protein_balance": round(total_protein - total_target_protein, 1),
         "workout_days": sum(1 for day in summaries if day["has_workout"]),
         "days": summaries,

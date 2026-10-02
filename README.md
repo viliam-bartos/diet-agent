@@ -194,7 +194,7 @@ nutrition-agent "150g hovězího a 200g brambor"
 Zobrazení přehledů podle období:
 ```bash
 nutrition-agent --today       # Dnešní plnění cílů a chybějící živiny
-nutrition-agent --week        # Týdenní souhrn (posledních 7 dní)
+nutrition-agent --week        # Týdenní souhrn (7 uzavřených dní, končí včerejškem)
 nutrition-agent --month       # Měsíční souhrn (posledních 30 dní)
 nutrition-agent --half-year   # Půlroční souhrn (posledních 180 dní)
 nutrition-agent --year        # Roční souhrn (posledních 365 dní)
@@ -291,8 +291,8 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 | :--- | :--- |
 | `GET /` | HTML dashboard. |
 | `GET /api/version` | Verze běžícího serveru. |
-| `GET /api/day?date=` | Jeden den: spotřeba, cíl, zbývající hodnoty a seznam jídel. Bez data znamená dnešek. |
-| `GET /api/week?date=` | Posledních 7 dní: součty, bilance proti cílům a rozpis po dnech. |
+| `GET /api/day?date=` | Jeden den: spotřeba, cíl, zbývající hodnoty a seznam jídel. Spotřeba bílkovin je v `protein_usable` (DIAAS) i `protein_total` (celkem). Bez data znamená dnešek. |
+| `GET /api/week?date=` | Posledních 7 uzavřených dní (okno končí včerejškem, protože dnešek se ještě jí): součty, bilance proti cílům a rozpis po dnech. |
 | `GET /api/weight-trend?days=` | Body jednotlivých vážení, 7denní klouzavý průměr a souhrnné hodnoty pro Chart.js. Výchozích 365 dní. |
 | `GET /api/heatmap?days=` | Adherence kalendář po dnech. Výchozích 365 dní. |
 | `GET /api/records?type=&limit=&offset=` | Stránkovaná a filtrovaná historie (jídla, váha, trénink). |
@@ -302,11 +302,11 @@ Server vystavuje HTML dashboard a REST API nad stejnou SQLite databází.
 
 ### Komponenty dashboardu
 
-- **Karty maker**: dnešní příjem kalorií, bílkovin, sacharidů a tuků proti dnešnímu cíli, s procentem plnění, pruhem a tím, kolik ještě zbývá. Každý den začínají od nuly.
-- **Bilance týdne**: součet příjmu za posledních 7 dní proti součtu cílů pro ty dny. Kladné číslo znamená přebytek, záporné deficit. Pod tím je rozpis po dnech, na který se dá kliknout.
+- **Karty maker**: dnešní příjem kalorií, bílkovin, sacharidů a tuků proti dnešnímu cíli, s procentem plnění, pruhem a tím, kolik ještě zbývá. U bílkovin je vidět i celková hodnota před DIAAS slevou (`celkem 160.2 / 171.9 g`). Každý den začínají od nuly.
+- **Bilance týdne**: součet příjmu za posledních **7 uzavřených dní** proti součtu cílů pro ty dny — okno končí včerejškem, protože dnešek se ještě jí a ráno by každý den vypadal jako deficit. Kladné číslo znamená přebytek, záporné deficit. Pod tím je rozpis po dnech, na který se dá kliknout, a součet bílkovin včetně celkových.
 - **Interaktivní graf váhy** (Chart.js): celý rok, osa Y se škáluje podle dat. Body jednotlivých vážení a spojitá čára 7denního klouzavého průměru.
 - **Adherence kalendář**: celý rok najednou, s popisky měsíců a dny v týdnu. Zelená = splněné kalorie i bílkoviny, modrá = splněné bílkoviny, oranžová = záznam pod cílem, bílý bod = tréninkový den. Dnešní den má oranžový rámeček.
-- **Panel dne**: kliknutím na den v kalendáři nebo v týdenním rozpisu se zobrazí jeho jídla a součty. Nahoře v poli pro záznam se pak píše na vybraný den, takže se dají jídla doplnit zpětně. Tlačítkem se výběr zruší.
+- **Panel dne**: kliknutím na den v kalendáři nebo v týdenním rozpisu se zobrazí jeho jídla a součty. Nahoře v poli pro záznam se pak píše na vybraný den, takže se dají jídla doplnit zpětně; u vybraného dne je vidět hláška a tlačítko pro návrat. Výběr dneška se za výběr nepovažuje, takže se hláška ani tlačítko neukazují.
 - **Tabulka záznamů**: stránkování, filtrování podle typu a tlačítka pro úpravu a smazání záznamu. Úprava jídla mění gramáž a stav a makra se zadávají **na 100 g**, tedy stejně jako v katalogu a na etiketě; na zadanou gramáž se přepočítají samy. Přepíšeš-li některé pole, uloží se jako ruční korekce (`manual`) a volitelně se stejná čísla zapíšou i do katalogu. Jedno pole můžeš nechat prázdné a dopočítá se z ostatních: energie = 4× bílkoviny + 4× sacharidy + 9× tuky + 7× alkohol. Když by zadaná čísla vyšla záporně, úprava se odmítne s vysvětlením. Alkohol se v dialogu needituje a zůstává beze změny.
 
 Dashboard používá barevnou paletu z `--bg-paper`, `--valve-orange` a `--aperture-cyan` s fonty Barlow Semi Condensed a Space Mono.
@@ -468,8 +468,10 @@ Schéma se inicializuje idempotentně při startu CLI, webu i bota. Databáze z 
 Systém počítá energetickou bilanci a makroživiny dynamicky podle aktuální tělesné hmotnosti (kalibrováno na 83 kg referenční váhy):
 
 1. **Lean Bulk (čisté nabírání)**:
-   - Tréninkový den: ~3 150 kcal, Bílkoviny: ~155 g DIAAS (~1.87 g/kg), Tuky: ~82.5 g (~1.0 g/kg), Sacharidy: ~430 g (~5.18 g/kg)
-   - Netréninkový den: ~2 650 kcal, Bílkoviny: ~145 g DIAAS (~1.75 g/kg), Tuky: ~77.5 g (~0.93 g/kg), Sacharidy: ~340 g (~4.10 g/kg)
+   - Tréninkový den: ~3 350 kcal, Bílkoviny: ~155 g DIAAS (~1.87 g/kg), Tuky: ~99.6 g (1.2 g/kg), Sacharidy: ~430 g (~5.18 g/kg)
+   - Netréninkový den: ~2 850 kcal, Bílkoviny: ~145 g DIAAS (~1.75 g/kg), Tuky: ~99.6 g (1.2 g/kg), Sacharidy: ~340 g (~4.10 g/kg)
+
+   Proti původnímu plánu je to o 200 kcal výš, protože se váha na předchozích hodnotách zastavila. Energie navíc jde do tuků, které drží na 1.2 g/kg; sacharidy zůstaly, kde byly.
 
 2. **Maintenance (udržování váhy)**:
    - Tréninkový den: ~2 750 kcal, Bílkoviny: ~150 g DIAAS (~1.81 g/kg), Tuky: ~82.5 g, Sacharidy: ~320 g
@@ -493,8 +495,8 @@ Poměry jsou kalibrované na 83 kg a liší se podle stavu a typu dne:
 
 | Stav | Typ dne | kcal/kg | Bílkoviny/kg | Sacharidy/kg | Tuky/kg |
 | :--- | :--- | ---: | ---: | ---: | ---: |
-| Lean Bulk | trénink | 37.95 | 1.87 | 5.18 | 0.99 |
-| Lean Bulk | odpočinek | 31.93 | 1.75 | 4.10 | 0.93 |
+| Lean Bulk | trénink | 40.36 | 1.87 | 5.18 | 1.20 |
+| Lean Bulk | odpočinek | 34.34 | 1.75 | 4.10 | 1.20 |
 | Maintenance | trénink | 33.13 | 1.81 | 3.86 | 0.99 |
 | Maintenance | odpočinek | 29.82 | 1.75 | 3.73 | 0.96 |
 | Cut | trénink | 26.51 | 2.11 | 2.59 | 0.82 |
@@ -511,7 +513,7 @@ Cíl se tedy sám mění, když:
 Dvě věci stojí za pozornost:
 
 - **Cíl je vždy dnešní.** Dashboard porovnává i staré záznamy proti současnému cíli, protože historické cíle se neukládají. Při změně váhy se tedy zpětně změní i procenta plnění u minulých měsíců.
-- **`TARGET_CALORIES` a `TARGET_PROTEIN_G` v `.env` přebíjí výpočet.** Když je nastavíš, zůstanou pevné a nebudou se s váhou měnit.
+- **`TARGET_CALORIES` a `TARGET_PROTEIN_G` v `.env` přebíjí výpočet.** Když je nastavíš, zůstanou pevné a nebudou se s váhou měnit — a změna plánu v `targets.py` se v dashboardu neprojeví, dokud je nevyprázdníš. Proto jsou v `.env.example` prázdné.
 
 ---
 

@@ -603,6 +603,7 @@ def handle_user_message(
         daily_foods = get_daily_food_logs(conn, report_day)
         day_cal = sum(x.calories for x in daily_foods)
         day_prot = sum(x.protein_usable for x in daily_foods)
+        day_prot_total = sum(x.protein_raw for x in daily_foods)
         day_carbs = sum(x.carbs for x in daily_foods)
         day_fats = sum(x.fats for x in daily_foods)
 
@@ -612,7 +613,16 @@ def handle_user_message(
         lines.append("---")
         if target_day:
             lines.append(f"Součet za den {report_day}:")
-        lines.append(format_daily_target_breakdown(day_cal, day_prot, day_carbs, day_fats, targets))
+        lines.append(
+            format_daily_target_breakdown(
+                day_cal,
+                day_prot,
+                day_carbs,
+                day_fats,
+                targets,
+                consumed_protein_total=day_prot_total,
+            )
+        )
         return "\n".join(lines)
 
     return "Nerozpoznaný typ záznamu."

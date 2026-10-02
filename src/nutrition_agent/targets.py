@@ -44,17 +44,19 @@ GOAL_RATIOS: dict[tuple[DietGoal, DayType], TargetRatios] = {
         fats_per_kg=80.0 / 83.0,
         carbs_per_kg=310.0 / 83.0,
     ),
-    # 2. Lean Bulk (default active mode)
+    # 2. Lean Bulk (default active mode). The energy carries 200 kcal more than the
+    # 2026-09 baseline because weight stalled on it, and the extra goes to fat: fat sits
+    # at 1.2 g/kg on purpose, carbohydrate stays where it was.
     (DietGoal.LEAN_BULK, DayType.TRAINING): TargetRatios(
-        calories_per_kg=3150.0 / 83.0,
+        calories_per_kg=3350.0 / 83.0,
         protein_per_kg=155.0 / 83.0,
-        fats_per_kg=82.5 / 83.0,
+        fats_per_kg=99.6 / 83.0,
         carbs_per_kg=430.0 / 83.0,
     ),
     (DietGoal.LEAN_BULK, DayType.REST): TargetRatios(
-        calories_per_kg=2650.0 / 83.0,
+        calories_per_kg=2850.0 / 83.0,
         protein_per_kg=145.0 / 83.0,
-        fats_per_kg=77.5 / 83.0,
+        fats_per_kg=99.6 / 83.0,
         carbs_per_kg=340.0 / 83.0,
     ),
     # 3. Cut

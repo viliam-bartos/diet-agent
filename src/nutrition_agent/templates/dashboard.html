@@ -1013,31 +1013,6 @@
       loadRecords();
     }
 
-    function renderMacroCard(valueId, barId, targetId, average, target, unit, decimals) {
-      const shown = average != null ? average.toFixed(decimals) : '--';
-      document.getElementById(valueId).textContent = shown;
-
-      const bar = document.getElementById(barId);
-      const targetEl = document.getElementById(targetId);
-
-      if (!target || target <= 0) {
-        bar.style.width = '0%';
-        bar.className = 'kpi-bar-fill empty';
-        targetEl.textContent = 'Cíl: --';
-        return;
-      }
-
-      const percent = (average / target) * 100;
-      bar.style.width = `${Math.min(percent, 100)}%`;
-      bar.className = 'kpi-bar-fill' + (percent > 105 ? ' over' : '');
-
-      const diff = average - target;
-      const sign = diff >= 0 ? '+' : '';
-      targetEl.textContent =
-        `Cíl: ${target.toFixed(decimals)} ${unit} | ${percent.toFixed(0)} % (${sign}${diff.toFixed(decimals)})`;
-      targetEl.className = 'kpi-subtext';
-    }
-
     // Anything that goes wrong while rendering has to be visible: a silently empty card
     // is impossible to diagnose from a phone. The banner itself is wired up in the head.
     function showError(message) {
@@ -1075,11 +1050,11 @@
     // Must match API_LEVEL in web.py; tests/test_web_api.py keeps the two in step.
     // A process started before an API change serves this page from disk but answers
     // with the old code, and this number is what gives it away.
-    const PAGE_API_LEVEL = 4;
+    const PAGE_API_LEVEL = 5;
 
     const REQUIRED_DAY_FIELDS = [
       'calories', 'target_calories',
-      'protein_usable', 'target_protein',
+      'protein_usable', 'target_protein', 'protein_total', 'target_protein_total',
       'carbs', 'target_carbs',
       'fats', 'target_fats',
       'version', 'api_level',
@@ -1107,7 +1082,7 @@
       document.getElementById('staleBanner').style.display = 'block';
     }
 
-    function renderMacroCard(valueId, barId, targetId, consumed, target, unit, decimals) {
+    function renderMacroCard(valueId, barId, targetId, consumed, target, unit, decimals, note) {
       document.getElementById(valueId).textContent =
         consumed != null ? consumed.toFixed(decimals) : '--';
 
@@ -1129,7 +1104,9 @@
       const left = remaining >= 0
         ? `zbývá ${remaining.toFixed(decimals)}`
         : `překročeno o ${Math.abs(remaining).toFixed(decimals)}`;
-      targetEl.textContent = `Cíl: ${target.toFixed(decimals)} ${unit} | ${percent.toFixed(0)} % | ${left}`;
+      targetEl.textContent =
+        `Cíl: ${target.toFixed(decimals)} ${unit} | ${percent.toFixed(0)} % | ${left}` +
+        (note ? ` | ${note}` : '');
     }
 
     async function loadDay() {
@@ -1145,7 +1122,8 @@
         renderMacroCard('kpiCals', 'kpiCalsBar', 'kpiCalsTarget',
           data.calories, data.target_calories, 'kcal', 0);
         renderMacroCard('kpiProtein', 'kpiProteinBar', 'kpiProteinTarget',
-          data.protein_usable, data.target_protein, 'g DIAAS', 1);
+          data.protein_usable, data.target_protein, 'g DIAAS', 1,
+          `celkem ${data.protein_total.toFixed(1)} / ${data.target_protein_total.toFixed(1)} g`);
         renderMacroCard('kpiCarbs', 'kpiCarbsBar', 'kpiCarbsTarget',
           data.carbs, data.target_carbs, 'g', 1);
         renderMacroCard('kpiFats', 'kpiFatsBar', 'kpiFatsTarget',
@@ -1189,7 +1167,8 @@
           `Dnů se záznamem: ${data.logged_days} z 7<br>` +
           `Přijato: ${Math.round(data.total_calories)} / ${Math.round(data.total_target_calories)} kcal<br>` +
           `Ø denně: ${avgDelta >= 0 ? '+' : ''}${avgDelta} kcal<br>` +
-          `Bílkoviny: ${data.total_protein.toFixed(0)} / ${data.total_target_protein.toFixed(0)} g<br>` +
+          `Bílkoviny: ${data.total_protein.toFixed(0)} / ${data.total_target_protein.toFixed(0)} g DIAAS<br>` +
+          `Bílkoviny celkem: ${data.total_protein_total.toFixed(0)} / ${data.total_target_protein_total.toFixed(0)} g<br>` +
           `Tréninků: ${data.workout_days}`;
 
         const daysEl = document.getElementById('weekDays');
@@ -1383,7 +1362,9 @@
     }
 
     async function selectDay(day) {
-      selectedDay = day;
+      // Today is the default state, not a selection: picking it in the calendar must not
+      // leave the "writing on <date>" hint and its way back on screen.
+      selectedDay = day === todayIso() ? '' : day;
       await Promise.all([loadDay(), loadHeatmap(), loadWeek()]);
       if (day) {
         await showDayPanel(day);

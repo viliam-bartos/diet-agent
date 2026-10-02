@@ -31,19 +31,33 @@ from nutrition_agent.targets import (
 
 def test_calculate_daily_targets_83kg_lean_bulk():
     """Verify target calculation matches spec for 83 kg in Lean Bulk."""
-    # Training day: ~3150 kcal, 155g P, 82.5g F, 430g C
+    # Training day: 3350 kcal, 155 g P, 99.6 g F (1.2 g/kg), 430 g C
     t_train = calculate_daily_targets(83.0, DietGoal.LEAN_BULK, DayType.TRAINING)
-    assert t_train.calories == 3150.0
+    assert t_train.calories == 3350.0
     assert t_train.protein_usable == 155.0
-    assert t_train.fats == 82.5
+    assert t_train.fats == 99.6
     assert t_train.carbs == 430.0
 
-    # Rest day: ~2650 kcal, 145g P, 77.5g F, 340g C
+    # Rest day: 2850 kcal, 145 g P, 99.6 g F, 340 g C
     t_rest = calculate_daily_targets(83.0, DietGoal.LEAN_BULK, DayType.REST)
-    assert t_rest.calories == 2650.0
+    assert t_rest.calories == 2850.0
     assert t_rest.protein_usable == 145.0
-    assert t_rest.fats == 77.5
+    assert t_rest.fats == 99.6
     assert t_rest.carbs == 340.0
+
+
+def test_lean_bulk_fat_target_is_one_point_two_grams_per_kilo():
+    """The bulk plan keeps fat at 1.2 g/kg and spends the extra energy on fat, not carbs."""
+    for day_type in (DayType.TRAINING, DayType.REST):
+        targets = calculate_daily_targets(83.0, DietGoal.LEAN_BULK, day_type)
+        assert targets.fats == 99.6  # 83 kg * 1.2
+
+    for weight in (70.0, 95.0):
+        targets = calculate_daily_targets(weight, DietGoal.LEAN_BULK, DayType.TRAINING)
+        assert targets.fats == round(weight * 1.2, 1)
+
+    # Carbohydrate is untouched by the change, so the added energy comes from fat.
+    assert calculate_daily_targets(83.0, DietGoal.LEAN_BULK, DayType.TRAINING).carbs == 430.0
 
 
 def test_calculate_daily_targets_maintenance_and_cut():
@@ -63,8 +77,8 @@ def test_calculate_daily_targets_dynamic_weight_scaling():
     t_80 = calculate_daily_targets(80.0, DietGoal.LEAN_BULK, DayType.TRAINING)
     t_90 = calculate_daily_targets(90.0, DietGoal.LEAN_BULK, DayType.TRAINING)
 
-    assert t_80.calories < 3150.0
-    assert t_90.calories > 3150.0
+    assert t_80.calories < 3350.0
+    assert t_90.calories > 3350.0
     assert t_90.protein_usable > t_80.protein_usable
 
     with pytest.raises(ValueError, match="Hmotnost musí být kladné číslo"):
@@ -122,8 +136,9 @@ def test_get_period_boundaries():
     assert end_d == "2026-09-20"
 
     start_w, end_w, _ = get_period_boundaries("tydenni", ref)
-    assert start_w == "2026-09-14"
-    assert end_w == "2026-09-20"
+    # A finished week: it ends yesterday, because today is still being eaten.
+    assert start_w == "2026-09-13"
+    assert end_w == "2026-09-19"
 
     start_all, end_all, _ = get_period_boundaries("kompletni", ref)
     assert start_all is None

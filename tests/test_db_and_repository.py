@@ -242,12 +242,11 @@ def test_init_db_moves_the_old_global_day_type_onto_its_date() -> None:
     Leaving it as one value for all days is what made the day after a workout look like
     a training day.
     """
-    from pathlib import Path
-
     from nutrition_agent.db import SCHEMA_SQL, _migrate_stored_day_type
+    from tests.scratch import TEST_SCRATCH_ROOT
 
     # The OS temp directory is not writable in the sandbox, so the file lives in the repo.
-    test_dir = Path(__file__).resolve().parent.parent / ".tmp" / "tests"
+    test_dir = TEST_SCRATCH_ROOT
     test_dir.mkdir(parents=True, exist_ok=True)
     db_path = test_dir / "legacy_day_type.db"
     db_path.unlink(missing_ok=True)

@@ -56,7 +56,7 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 # literal in its template and compares it with the value the server reports. A process
 # started before the change serves the new template from disk while still running the
 # old code, and the version string alone does not give that away.
-API_LEVEL: int = 4
+API_LEVEL: int = 5
 
 RecordType = Literal["food", "weight", "workout"]
 
@@ -170,6 +170,13 @@ def _parse_day_or_422(value: str) -> str:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+def _yesterday() -> str:
+    """Local date of yesterday, the last finished day."""
+    from datetime import datetime, timedelta
+
+    return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+
 def create_app() -> FastAPI:
     """Create and configure FastAPI application."""
     # Schema creation is idempotent and upgrades databases created by older versions.
@@ -200,12 +207,19 @@ def create_app() -> FastAPI:
             goal, _, weight = get_user_profile(conn)
             detail["goal"] = goal.value
             detail["weight_kg"] = weight
-            detail["target_calories"] = (
-                settings.target_calories if settings.target_calories else detail["target_calories"]
-            )
-            detail["target_protein"] = (
-                settings.target_protein_g if settings.target_protein_g else detail["target_protein"]
-            )
+            # A pinned target replaces the derived one, so what is still left to eat has to
+            # be recomputed with it; otherwise the card would show a target it does not
+            # measure itself against.
+            if settings.target_calories:
+                detail["target_calories"] = settings.target_calories
+                detail["remaining_calories"] = round(
+                    settings.target_calories - detail["calories"], 0
+                )
+            if settings.target_protein_g:
+                detail["target_protein"] = settings.target_protein_g
+                detail["remaining_protein"] = round(
+                    settings.target_protein_g - detail["protein_usable"], 1
+                )
             detail["version"] = __version__
             detail["api_level"] = API_LEVEL
             return detail
@@ -213,8 +227,12 @@ def create_app() -> FastAPI:
             conn.close()
 
     @app.get("/api/week")
-    async def api_week(date: str = Query("", description="Poslední den okna, prázdné je dnes")):
-        end_day = _parse_day_or_422(date)
+    async def api_week(
+        date: str = Query("", description="Poslední den okna, prázdné je včerejšek"),
+    ):
+        # The weekly balance covers finished days: today is still being eaten, so counting
+        # it would show a deficit all day.
+        end_day = _parse_day_or_422(date) if date.strip() else _yesterday()
         conn = get_connection(settings.database_path)
         try:
             return get_week_summary(conn, end_day, days=7)

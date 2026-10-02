@@ -211,6 +211,7 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
 
             total_cal = sum(x.calories for x in food_logs)
             total_prot = sum(x.protein_usable for x in food_logs)
+            total_prot_total = sum(x.protein_raw for x in food_logs)
             total_carbs = sum(x.carbs for x in food_logs)
             total_fats = sum(x.fats for x in food_logs)
 
@@ -219,7 +220,9 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
 
             macros_text = (
                 f"Kalorie:   {bar_cal}  ({total_cal:.0f} / {targets.calories:.0f} kcal)\n"
-                f"Bílkoviny: {bar_prot}  ({total_prot:.1f} / {targets.protein_usable:.1f} g)\n"
+                f"Bílkoviny: {bar_prot}  "
+                f"({total_prot:.1f} / {targets.protein_usable:.1f} g DIAAS)\n"
+                f"Celkem bílkovin: {total_prot_total:.1f} / {targets.protein_total:.1f} g\n"
                 f"Sacharidy: {total_carbs:.0f} g / {targets.carbs:.0f} g  |  "
                 f"Tuky: {total_fats:.0f} g / {targets.fats:.0f} g"
             )

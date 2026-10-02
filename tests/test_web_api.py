@@ -10,10 +10,11 @@ import nutrition_agent.web as web_module
 from nutrition_agent.db import get_connection, init_db
 from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog, CalculatedWorkoutLog
 from nutrition_agent.repository import save_food_logs, save_weight_log, save_workout_log
+from tests.scratch import TEST_SCRATCH_ROOT
 
 # Sandbox restricts the OS temp directory, so the test database lives in a workspace folder.
 # One reused file keeps the workspace clean; each test truncates the tables first.
-TEST_DB_PATH = Path(__file__).resolve().parent.parent / ".tmp" / "tests" / "web_api_test.db"
+TEST_DB_PATH = TEST_SCRATCH_ROOT / "web_api_test.db"
 
 
 def _reset_tables(db_path: Path) -> None:
@@ -325,10 +326,11 @@ def test_api_day_endpoint_returns_today(api_client: TestClient):
     assert data["calories"] == 212.0
     assert data["protein_usable"] == 46.0
     assert data["fats"] == 2.4
-    assert data["target_calories"] == 3150.0
+    assert data["target_calories"] == 3150.0  # pinned by the fixture through settings
     assert data["target_carbs"] == 430.0
-    assert data["target_fats"] == 82.5
+    assert data["target_fats"] == 99.6
     assert data["goal"] == "lean_bulk"
+    # A pinned target has to carry its own remaining value.
     assert data["remaining_calories"] == 3150.0 - 212.0
     assert data["version"] == __version__
     assert len(data["items"]) == 1
@@ -353,19 +355,79 @@ def test_api_day_endpoint_rejects_a_bad_date(api_client: TestClient):
     assert response.status_code == 422
 
 
+def test_api_day_payload_carries_total_protein(api_client: TestClient):
+    """Both the discounted and the total protein are reported for the day."""
+    data = api_client.get("/api/day").json()
+
+    assert data["protein_usable"] == 46.0
+    assert data["protein_total"] == 46.0  # the fixture logs raw protein equal to usable
+    assert data["target_protein_total"] > data["target_protein"]  # 10 % above the target
+
+
+def test_dashboard_shows_total_protein_next_to_diaas(api_client: TestClient):
+    """The cards and the week summary show total protein beside the DIAAS number.
+
+    This is a proxy check: it reads the template rather than running a browser.
+    """
+    body = api_client.get("/").text
+
+    # The day card takes the totals as an extra note, and the server must send them.
+    assert "celkem ${data.protein_total.toFixed(1)}" in body
+    assert "'protein_total', 'target_protein_total'," in body
+    # The weekly summary lists both numbers.
+    assert "g DIAAS<br>" in body
+    assert "Bílkoviny celkem:" in body
+
+
+def test_dashboard_treats_today_as_the_default_day(api_client: TestClient):
+    """Picking today in the calendar must not look like writing on a past day.
+
+    The hint and its "back to today" button appear only for an explicit other day, so
+    today has to normalise to no selection.
+
+    This is a proxy check: it reads the template rather than running a browser.
+    """
+    body = api_client.get("/").text
+
+    assert "selectedDay = day === todayIso() ? '' : day;" in body
+    # The hint is shown for an explicit selection only.
+    assert "if (selectedDay) {\n          hint.innerHTML" in body
+
+
 def test_api_week_endpoint_reports_the_balance(api_client: TestClient):
-    """The week endpoint returns a 7-day window with a signed balance."""
+    """The week endpoint balances finished days only: yesterday is the last one.
+
+    Today is still being eaten, so counting it would show a deficit all day long.
+    """
     data = api_client.get("/api/week").json()
 
+    today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
     assert len(data["days"]) == 7
-    assert data["logged_days"] == 5
-    assert data["workout_days"] == 1
-    assert data["total_calories"] == 212.0 * 5
+    assert data["end_date"] == yesterday
+    assert today not in [day["date"] for day in data["days"]]
+
+    # The fixture logs one meal a day for five days, so four fall inside the window.
+    assert data["logged_days"] == 4
+    assert data["total_calories"] == 212.0 * 4
+    assert data["workout_days"] == 0  # the seeded workout is today, outside the window
     assert data["calorie_balance"] == round(
         data["total_calories"] - data["total_target_calories"], 0
     )
     # 212 kcal a day is far below any target
     assert data["calorie_balance"] < 0
+
+
+def test_api_week_endpoint_accepts_an_explicit_end_day(api_client: TestClient):
+    """Passing a date still moves the window, and the payload carries total protein."""
+    day = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    data = api_client.get("/api/week", params={"date": day}).json()
+
+    assert data["end_date"] == day
+    assert len(data["days"]) == 7
+    assert data["total_protein_total"] == sum(day["protein_total"] for day in data["days"])
+    assert data["total_target_protein_total"] > 0
 
 
 def test_dashboard_kpi_cards_show_macros_with_targets(api_client: TestClient):
@@ -628,5 +690,5 @@ def test_create_app_uses_derived_targets_when_env_unset(
     data = client.get("/api/day").json()
 
     # Latest seeded weight is 83.0 kg -> lean bulk training day targets
-    assert data["target_calories"] == 3150.0
+    assert data["target_calories"] == 3350.0
     assert data["target_protein"] == 155.0

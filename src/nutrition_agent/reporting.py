@@ -67,8 +67,13 @@ def format_daily_target_breakdown(
     consumed_carbs: float,
     consumed_fats: float,
     targets: DailyTargets,
+    consumed_protein_total: float | None = None,
 ) -> str:
-    """Format table and progress bars comparing daily consumption with targets."""
+    """Format table and progress bars comparing daily consumption with targets.
+
+    ``consumed_protein_total`` is the protein before the DIAAS discount; when it is
+    given, the protein line shows both numbers.
+    """
     cal_diff = consumed_calories - targets.calories
     cal_diff_str = f"+{cal_diff:.1f}" if cal_diff >= 0 else f"{cal_diff:.1f}"
 
@@ -86,6 +91,12 @@ def format_daily_target_breakdown(
     bar_carbs = render_progress_bar(consumed_carbs, targets.carbs, width=16)
     bar_fats = render_progress_bar(consumed_fats, targets.fats, width=16)
 
+    protein_total_note = ""
+    if consumed_protein_total is not None:
+        protein_total_note = (
+            f" | celkem {consumed_protein_total:6.1f} / {targets.protein_total:6.1f} g"
+        )
+
     lines = [
         f"Cílový stav: {targets.goal.value.upper()} | Typ dne: {targets.day_type.value.upper()} "
         f"| Váha: {targets.weight_kg:.1f} kg",
@@ -94,7 +105,7 @@ def format_daily_target_breakdown(
         f"Energie:     {bar_cal}  {consumed_calories:6.1f} / {targets.calories:6.1f} kcal "
         f"(rozdíl: {cal_diff_str} kcal)",
         f"Bílkoviny:   {bar_prot}  {consumed_protein:6.1f} / {targets.protein_usable:6.1f} g DIAAS "
-        f"(rozdíl: {prot_diff_str} g)",
+        f"(rozdíl: {prot_diff_str} g){protein_total_note}",
         f"Sacharidy:   {bar_carbs}  {consumed_carbs:6.1f} / {targets.carbs:6.1f} g "
         f"(rozdíl: {carbs_diff_str} g)",
         f"Tuky:        {bar_fats}  {consumed_fats:6.1f} / {targets.fats:6.1f} g "
@@ -116,8 +127,10 @@ def get_period_boundaries(
         return now_str, now_str, f"Denní souhrn ({now_str})"
 
     if p in ("tydenni", "tyden", "week", "7d", "7"):
-        start = (now - timedelta(days=6)).strftime("%Y-%m-%d")
-        return start, now_str, f"Týdenní souhrn ({start} až {now_str})"
+        # A finished week: today is still being eaten, so it would drag the balance down.
+        start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        end = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        return start, end, f"Týdenní souhrn ({start} až {end})"
 
     if p in ("mesicni", "mesic", "month", "30d", "30"):
         start = (now - timedelta(days=29)).strftime("%Y-%m-%d")
@@ -167,11 +180,19 @@ def generate_period_report(
     if period.strip().lower() in ("denni", "den", "today", "dnes"):
         total_cal = sum(item.calories for item in food_logs)
         total_prot = sum(item.protein_usable for item in food_logs)
+        total_prot_total = sum(item.protein_raw for item in food_logs)
         total_carbs = sum(item.carbs for item in food_logs)
         total_fats = sum(item.fats for item in food_logs)
 
         lines.append(
-            format_daily_target_breakdown(total_cal, total_prot, total_carbs, total_fats, targets)
+            format_daily_target_breakdown(
+                total_cal,
+                total_prot,
+                total_carbs,
+                total_fats,
+                targets,
+                consumed_protein_total=total_prot_total,
+            )
         )
 
         if food_logs:
