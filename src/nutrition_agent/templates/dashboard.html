@@ -74,7 +74,7 @@
 
     header {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-end;
       align-items: center;
       flex-wrap: wrap;
       gap: 16px;
@@ -342,24 +342,10 @@
     }
 
     /* Level classes are standalone so both heatmap cells and legend swatches pick them up. */
-    .level-empty {
-      background: #E6DFC5;
-    }
-
-    .level-green {
-      background: #38A169;
-      border-color: #2F855A;
-    }
-
-    .level-blue {
-      background: #3182CE;
-      border-color: #2B6CB0;
-    }
-
-    .level-amber {
-      background: #DD6B20;
-      border-color: #C05621;
-    }
+    .level-empty { background: #E6DFC5; }
+    .level-green { background: #38A169; border-color: #2F855A; }
+    .level-blue { background: #3182CE; border-color: #2B6CB0; }
+    .level-amber { background: #DD6B20; border-color: #C05621; }
 
     .heatmap-cell.has-workout::after {
       content: '';
@@ -661,11 +647,18 @@
     }
 
     .week-stats {
-      font-family: var(--font-mono);
-      font-size: 12px;
-      color: var(--ink-secondary);
       text-align: right;
-      line-height: 1.7;
+    }
+
+    .week-stats .kpi-label {
+      text-align: right;
+    }
+
+    .week-stats .week-balance {
+      font-family: 'Barlow Semi Condensed', sans-serif;
+      font-size: 30px;
+      font-weight: 700;
+      line-height: 1.1;
     }
 
     .week-days {
@@ -676,7 +669,7 @@
     }
 
     .week-day {
-      flex: 1 1 60px;
+      flex: 1 1 75px;
       border: var(--border-subtle);
       padding: 6px 4px;
       text-align: center;
@@ -698,6 +691,8 @@
 
     .week-day .wd-date {
       color: var(--ink-muted);
+      white-space: nowrap;
+      font-size: 10px;
     }
 
     .week-day .wd-value {
@@ -951,6 +946,7 @@
         </div>
         <div class="week-stats" id="weekStats"></div>
       </div>
+      <!-- g DIAAS<br> Bílkoviny celkem: -->
       <div class="week-days" id="weekDays"></div>
     </div>
 
@@ -1030,7 +1026,7 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 140px;">Čas</th>
+              <th style="width: 150px;">Čas</th>
               <th style="width: 90px;">Typ</th>
               <th>Položka / Název</th>
               <th>Detaily / Nutrienty</th>
@@ -1078,6 +1074,26 @@
 
     // Which day new records go to. Empty means today.
     let selectedDay = '';
+
+    function formatDate(dateStr) {
+      if (!dateStr) return '';
+      const match = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) {
+        const [, year, month, day] = match;
+        return `${day}/${month}/${year}`;
+      }
+      return dateStr;
+    }
+
+    function formatDateTime(dateTimeStr) {
+      if (!dateTimeStr) return '';
+      const match = String(dateTimeStr).match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}:\d{2})/);
+      if (match) {
+        const [, year, month, day, time] = match;
+        return `${day}/${month}/${year} ${time}`;
+      }
+      return formatDate(dateTimeStr);
+    }
 
     async function fetchData() {
       await Promise.all([loadDay(), loadWeek(), loadWeightTrend(), loadHeatmap(), loadRecords()]);
@@ -1217,7 +1233,7 @@
         const hint = document.getElementById('logTargetHint');
         if (selectedDay) {
           hint.innerHTML =
-            `Zapisuji na den <strong>${selectedDay}</strong>. ` +
+            `Zapisuji na den <strong>${formatDate(selectedDay)}</strong>. ` +
             `<button type="button" class="btn-clear-day" onclick="clearSelectedDay()">` +
             `Zpět na dnešek</button>`;
           hint.style.display = 'block';
@@ -1237,16 +1253,31 @@
         const balance = data.calorie_balance;
         const balanceEl = document.getElementById('weekBalance');
 
-        const sign = balance > 0 ? '+' : '';
-        balanceEl.textContent = `${sign}${Math.round(balance)} kcal`;
-        balanceEl.className = 'week-balance ' +
-          (balance > 50 ? 'surplus' : balance < -50 ? 'deficit' : 'neutral');
+        if (balanceEl) {
+          const sign = balance > 0 ? '+' : '';
+          balanceEl.textContent = `${sign}${Math.round(balance)} kcal`;
+          balanceEl.className = 'week-balance ' +
+            (balance > 50 ? 'surplus' : balance < -50 ? 'deficit' : 'neutral');
+        }
+
+        const weekLabelEl = document.getElementById('weekLabel');
+        if (weekLabelEl) {
+          weekLabelEl.textContent = data.start_date && data.end_date
+            ? `Bilance týdne (${formatDate(data.start_date)} až ${formatDate(data.end_date)})`
+            : 'Týden';
+        }
 
         const avgDelta = data.logged_days
           ? Math.round((data.total_calories - data.total_target_calories) / data.logged_days)
           : 0;
-        document.getElementById('weekStats').innerHTML =
-          `Ø denně: ${avgDelta >= 0 ? '+' : ''}${avgDelta} kcal<br>`;
+        const avgSign = avgDelta > 0 ? '+' : '';
+        const avgClass = avgDelta > 50 ? 'surplus' : avgDelta < -50 ? 'deficit' : 'neutral';
+        const weekStatsEl = document.getElementById('weekStats');
+        if (weekStatsEl) {
+          weekStatsEl.innerHTML =
+            `<div class="kpi-label">Ø denně</div>` +
+            `<div class="week-balance ${avgClass}">${avgSign}${avgDelta} kcal</div>`;
+        }
 
         const daysEl = document.getElementById('weekDays');
         daysEl.innerHTML = '';
@@ -1256,7 +1287,7 @@
           el.className = 'week-day' + (day.date === selectedDay ? ' selected' : '');
           el.onclick = () => selectDay(day.date);
           el.innerHTML =
-            `<div class="wd-date">${day.date.slice(5)}</div>` +
+            `<div class="wd-date">${formatDate(day.date)}</div>` +
             (day.has_food
               ? `<div class="wd-value">${Math.round(day.calories)}</div>` +
               `<div class="wd-delta ${delta >= 0 ? 'pos' : 'neg'}">` +
@@ -1313,7 +1344,7 @@
         weightChartInstance = new Chart(ctx, {
           type: 'line',
           data: {
-            labels: points.map(p => p.date),
+            labels: points.map(p => formatDate(p.date)),
             datasets: [
               {
                 label: 'Naměřená váha (kg)',
@@ -1354,7 +1385,7 @@
             },
             plugins: {
               legend: {
-                labels: { font: { family: 'Barlow Semi Condensed', size: 13 } }
+                display: false
               }
             }
           }
@@ -1424,7 +1455,7 @@
             (c.date === selectedDay ? ' selected' : '') +
             (c.date === today ? ' today' : '');
           cellEl.title =
-            `${c.date} (${c.day_type === 'training' ? 'trénink' : 'odpočinek'})\n` +
+            `${formatDate(c.date)} (${c.day_type === 'training' ? 'trénink' : 'odpočinek'})\n` +
             `Energie: ${c.calories} / ${c.target_calories} kcal\n` +
             `Bílkoviny: ${c.protein_usable} / ${c.target_protein} g DIAAS\n` +
             `Sacharidy: ${c.carbs} g | Tuky: ${c.fats} g` +
@@ -1454,7 +1485,7 @@
       const data = await (await fetch(`/api/day?date=${day}`)).json();
       const panel = document.getElementById('dayPanel');
 
-      document.getElementById('dayPanelTitle').textContent = day;
+      document.getElementById('dayPanelTitle').textContent = formatDate(day);
       document.getElementById('dayPanelTotals').innerHTML =
         `${Math.round(data.calories)} / ${Math.round(data.target_calories)} kcal | ` +
         `${data.protein_usable.toFixed(1)} / ${data.target_protein.toFixed(1)} g DIAAS | ` +
@@ -1514,7 +1545,7 @@
 
         data.items.forEach(r => {
           const tr = document.createElement('tr');
-          const timeFormatted = r.logged_at ? r.logged_at.slice(0, 16).replace('T', ' ') : '';
+          const timeFormatted = formatDateTime(r.logged_at);
           tr.innerHTML = `
             <td style="font-family: var(--font-mono); font-size: 12px;">${timeFormatted}</td>
             <td><span class="tag-badge tag-${r.type}">${r.type}</span></td>
