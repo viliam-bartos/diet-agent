@@ -1,16 +1,17 @@
 <!DOCTYPE html>
 <html lang="cs">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nutrition Agent // Dashboard</title>
+  <title>Nutriční deník</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- Not render-blocking on purpose: a phone that reaches only this machine would
        otherwise stare at a blank page until the font request gives up. The fonts are a
        detail; the numbers are not. -->
   <link rel="stylesheet" media="print" onload="this.media='all'"
-        href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap">
+    href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;600;700&family=Space+Mono:wght@400;700&display=swap">
   <script>
     // Registered before the dashboard script, so even a syntax error in that script is
     // reported. Without this a broken page just stays empty and says nothing.
@@ -50,7 +51,11 @@
       --font-mono: 'Space Mono', 'JetBrains Mono', Consolas, monospace;
     }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
     body {
       background-color: var(--bg-paper);
@@ -135,7 +140,8 @@
       border: var(--border-technical);
     }
 
-    button, .btn {
+    button,
+    .btn {
       padding: 10px 18px;
       font-family: var(--font-display);
       font-size: 15px;
@@ -149,7 +155,8 @@
       transition: all 0.1s ease-in-out;
     }
 
-    button:hover, .btn:hover {
+    button:hover,
+    .btn:hover {
       background: var(--bg-cardboard-dark);
       transform: translate(-1px, -1px);
       box-shadow: 2px 2px 0px var(--ink-primary);
@@ -215,8 +222,13 @@
       color: var(--ink-secondary);
     }
 
-    .kpi-subtext.positive { color: #1e7e34; }
-    .kpi-subtext.negative { color: #b21f2d; }
+    .kpi-subtext.positive {
+      color: #1e7e34;
+    }
+
+    .kpi-subtext.negative {
+      color: #b21f2d;
+    }
 
     /* Shown in place of a chart that could not be drawn. */
     .chart-note {
@@ -226,7 +238,9 @@
       margin-bottom: 8px;
     }
 
-    .chart-note:empty { display: none; }
+    .chart-note:empty {
+      display: none;
+    }
 
     .kpi-bar {
       height: 6px;
@@ -328,10 +342,24 @@
     }
 
     /* Level classes are standalone so both heatmap cells and legend swatches pick them up. */
-    .level-empty { background: #E6DFC5; }
-    .level-green { background: #38A169; border-color: #2F855A; }
-    .level-blue { background: #3182CE; border-color: #2B6CB0; }
-    .level-amber { background: #DD6B20; border-color: #C05621; }
+    .level-empty {
+      background: #E6DFC5;
+    }
+
+    .level-green {
+      background: #38A169;
+      border-color: #2F855A;
+    }
+
+    .level-blue {
+      background: #3182CE;
+      border-color: #2B6CB0;
+    }
+
+    .level-amber {
+      background: #DD6B20;
+      border-color: #C05621;
+    }
 
     .heatmap-cell.has-workout::after {
       content: '';
@@ -407,9 +435,23 @@
       border: 1px solid var(--ink-primary);
     }
 
-    .tag-food { background: #EBF8FF; color: #2B6CB0; border-color: #2B6CB0; }
-    .tag-weight { background: #FEFCBF; color: #B7791F; border-color: #B7791F; }
-    .tag-workout { background: #FEEBC8; color: #C05621; border-color: #C05621; }
+    .tag-food {
+      background: #EBF8FF;
+      color: #2B6CB0;
+      border-color: #2B6CB0;
+    }
+
+    .tag-weight {
+      background: #FEFCBF;
+      color: #B7791F;
+      border-color: #B7791F;
+    }
+
+    .tag-workout {
+      background: #FEEBC8;
+      color: #C05621;
+      border-color: #C05621;
+    }
 
     .pagination {
       display: flex;
@@ -606,9 +648,17 @@
       line-height: 1.1;
     }
 
-    .week-balance.surplus { color: var(--valve-orange); }
-    .week-balance.deficit { color: var(--aperture-cyan); }
-    .week-balance.neutral { color: var(--ink-secondary); }
+    .week-balance.surplus {
+      color: var(--valve-orange);
+    }
+
+    .week-balance.deficit {
+      color: var(--aperture-cyan);
+    }
+
+    .week-balance.neutral {
+      color: var(--ink-secondary);
+    }
 
     .week-stats {
       font-family: var(--font-mono);
@@ -646,10 +696,21 @@
       background: var(--valve-orange-glow);
     }
 
-    .week-day .wd-date { color: var(--ink-muted); }
-    .week-day .wd-value { font-weight: 700; }
-    .week-day .wd-delta.pos { color: var(--valve-orange); }
-    .week-day .wd-delta.neg { color: var(--aperture-cyan); }
+    .week-day .wd-date {
+      color: var(--ink-muted);
+    }
+
+    .week-day .wd-value {
+      font-weight: 700;
+    }
+
+    .week-day .wd-delta.pos {
+      color: var(--valve-orange);
+    }
+
+    .week-day .wd-delta.neg {
+      color: var(--aperture-cyan);
+    }
 
     .week-day .wd-workout {
       width: 5px;
@@ -738,7 +799,9 @@
       box-shadow: 4px 4px 0px rgba(24, 24, 26, 0.8);
     }
 
-    .day-panel.open { display: block; }
+    .day-panel.open {
+      display: block;
+    }
 
     .day-panel-header {
       display: flex;
@@ -782,7 +845,10 @@
       min-width: 46px;
     }
 
-    .day-item-name { font-weight: 600; flex: 1 1 200px; }
+    .day-item-name {
+      font-weight: 600;
+      flex: 1 1 200px;
+    }
 
     .day-item-macros {
       font-family: var(--font-mono);
@@ -811,6 +877,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="container">
     <div id="staleBanner" class="stale-banner">
@@ -821,7 +888,6 @@
     <div id="errorBanner" class="error-banner"></div>
 
     <header>
-      <div class="brand-title">Nutrition Agent</div>
       <div class="status-badge">
         <span class="badge-dot"></span>
         <span id="activeGoalDisplay">LEAN_BULK // TRAINING</span>
@@ -831,7 +897,9 @@
     <!-- Quick Message Entry -->
     <div class="quick-input-card">
       <form id="logForm" class="quick-input-form" onsubmit="submitLog(event)">
-        <input type="text" id="logMessage" placeholder="Zadejte jídlo, váhu nebo trénink (např. '150g hovězí', 'Váha 83.4 kg', 'Trénink nohy 60 min')..." required>
+        <input type="text" id="logMessage"
+          placeholder="Zadejte jídlo, váhu nebo trénink (např. '150g hovězí', 'Váha 83.4 kg', 'Trénink nohy 60 min')..."
+          required>
         <button type="submit" class="btn btn-primary">Zapsat záznam</button>
       </form>
       <div id="logTargetHint" class="log-target-hint"></div>
@@ -843,25 +911,33 @@
       <div class="kpi-card">
         <div class="kpi-label">Kalorie</div>
         <div class="kpi-value"><span id="kpiCals">--</span> <span class="kpi-unit">kcal</span></div>
-        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiCalsBar"></div></div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-fill" id="kpiCalsBar"></div>
+        </div>
         <div class="kpi-subtext" id="kpiCalsTarget">Cíl: --</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Bílkoviny</div>
         <div class="kpi-value"><span id="kpiProtein">--</span> <span class="kpi-unit">g</span></div>
-        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiProteinBar"></div></div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-fill" id="kpiProteinBar"></div>
+        </div>
         <div class="kpi-subtext" id="kpiProteinTarget">Cíl: --</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Sacharidy</div>
         <div class="kpi-value"><span id="kpiCarbs">--</span> <span class="kpi-unit">g</span></div>
-        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiCarbsBar"></div></div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-fill" id="kpiCarbsBar"></div>
+        </div>
         <div class="kpi-subtext" id="kpiCarbsTarget">Cíl: --</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">Tuky</div>
         <div class="kpi-value"><span id="kpiFats">--</span> <span class="kpi-unit">g</span></div>
-        <div class="kpi-bar"><div class="kpi-bar-fill" id="kpiFatsBar"></div></div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-fill" id="kpiFatsBar"></div>
+        </div>
         <div class="kpi-subtext" id="kpiFatsTarget">Cíl: --</div>
       </div>
     </div>
@@ -881,7 +957,7 @@
     <!-- Weight Trend Chart -->
     <div class="dashboard-section">
       <div class="section-header">
-        <div class="section-title">Vývoj tělesné hmotnosti (rok)</div>
+        <div class="section-title">Hmotnost</div>
         <div class="kpi-value" style="margin: 0; font-size: 22px;">
           <span id="kpiWeight">--</span> <span class="kpi-unit">kg</span>
         </div>
@@ -895,9 +971,6 @@
 
     <!-- Calendar Heatmap -->
     <div class="dashboard-section">
-      <div class="section-header">
-        <div class="section-title">Adherence kalendář & tréninky (rok)</div>
-      </div>
       <div class="heatmap-container">
         <div class="heatmap-body">
           <div class="heatmap-weekdays">
@@ -910,11 +983,21 @@
         </div>
       </div>
       <div class="heatmap-legend">
-        <div class="legend-item"><div class="legend-box level-green"></div> Splněné kalorie i bílkoviny</div>
-        <div class="legend-item"><div class="legend-box level-blue"></div> Splněné bílkoviny</div>
-        <div class="legend-item"><div class="legend-box level-amber"></div> Záznam pod cílem</div>
-        <div class="legend-item"><div class="legend-box level-empty"></div> Bez záznamu</div>
-        <div class="legend-item"><div class="legend-box legend-workout"></div> Tréninkový den</div>
+        <div class="legend-item">
+          <div class="legend-box level-green"></div> Splněné kalorie i bílkoviny
+        </div>
+        <div class="legend-item">
+          <div class="legend-box level-blue"></div> Splněné bílkoviny
+        </div>
+        <div class="legend-item">
+          <div class="legend-box level-amber"></div> Záznam pod cílem
+        </div>
+        <div class="legend-item">
+          <div class="legend-box level-empty"></div> Bez záznamu
+        </div>
+        <div class="legend-item">
+          <div class="legend-box legend-workout"></div> Tréninkový den
+        </div>
       </div>
     </div>
 
@@ -933,7 +1016,7 @@
     <!-- Detailed Records Table -->
     <div class="dashboard-section">
       <div class="section-header">
-        <div class="section-title">Podrobný přehled záznamů</div>
+        <div class="section-title">Záznamy</div>
         <div class="table-controls">
           <div class="filter-buttons">
             <button class="filter-btn active" onclick="setFilter('all')">Vše</button>
@@ -956,7 +1039,9 @@
             </tr>
           </thead>
           <tbody id="recordsBody">
-            <tr><td colspan="6" style="text-align: center; color: var(--ink-muted);">Načítám data...</td></tr>
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--ink-muted);">Načítám data...</td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -1157,19 +1242,11 @@
         balanceEl.className = 'week-balance ' +
           (balance > 50 ? 'surplus' : balance < -50 ? 'deficit' : 'neutral');
 
-        document.getElementById('weekLabel').textContent =
-          `Bilance týdne (${data.start_date} až ${data.end_date})`;
-
         const avgDelta = data.logged_days
           ? Math.round((data.total_calories - data.total_target_calories) / data.logged_days)
           : 0;
         document.getElementById('weekStats').innerHTML =
-          `Dnů se záznamem: ${data.logged_days} z 7<br>` +
-          `Přijato: ${Math.round(data.total_calories)} / ${Math.round(data.total_target_calories)} kcal<br>` +
-          `Ø denně: ${avgDelta >= 0 ? '+' : ''}${avgDelta} kcal<br>` +
-          `Bílkoviny: ${data.total_protein.toFixed(0)} / ${data.total_target_protein.toFixed(0)} g DIAAS<br>` +
-          `Bílkoviny celkem: ${data.total_protein_total.toFixed(0)} / ${data.total_target_protein_total.toFixed(0)} g<br>` +
-          `Tréninků: ${data.workout_days}`;
+          `Ø denně: ${avgDelta >= 0 ? '+' : ''}${avgDelta} kcal<br>`;
 
         const daysEl = document.getElementById('weekDays');
         daysEl.innerHTML = '';
@@ -1182,8 +1259,8 @@
             `<div class="wd-date">${day.date.slice(5)}</div>` +
             (day.has_food
               ? `<div class="wd-value">${Math.round(day.calories)}</div>` +
-                `<div class="wd-delta ${delta >= 0 ? 'pos' : 'neg'}">` +
-                `${delta >= 0 ? '+' : ''}${Math.round(delta)}</div>`
+              `<div class="wd-delta ${delta >= 0 ? 'pos' : 'neg'}">` +
+              `${delta >= 0 ? '+' : ''}${Math.round(delta)}</div>`
               : '<div class="wd-value">--</div><div class="wd-delta">-</div>') +
             (day.has_workout ? '<div class="wd-workout"></div>' : '');
           daysEl.appendChild(el);
@@ -1289,7 +1366,7 @@
     }
 
     const MONTH_NAMES = ['Led', 'Úno', 'Bře', 'Dub', 'Kvě', 'Čvn',
-                         'Čvc', 'Srp', 'Zář', 'Říj', 'Lis', 'Pro'];
+      'Čvc', 'Srp', 'Zář', 'Říj', 'Lis', 'Pro'];
 
     async function loadHeatmap() {
       try {
@@ -1702,4 +1779,5 @@
     fetchData();
   </script>
 </body>
+
 </html>
