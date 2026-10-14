@@ -233,13 +233,28 @@ def test_day_detail_on_day_without_records(seeded_db: sqlite3.Connection):
     assert detail["weight_kg"] is None
 
 
-def test_weight_trend_for_days_returns_headline_numbers(seeded_db: sqlite3.Connection):
+def test_weight_trend_for_days_returns_headline_numbers():
     """The chart endpoint returns points plus the numbers shown next to it."""
-    data = get_weight_trend_for_days(seeded_db, days=30)
+    from datetime import datetime, timedelta
+
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+    today = datetime.now()
+    for offset in range(10):
+        day = (today - timedelta(days=9 - offset)).strftime("%Y-%m-%d")
+        save_weight_log(
+            conn,
+            CalculatedWeightLog(
+                logged_at=f"{day}T07:00:00Z",
+                raw_input=f"{83.0 + offset * 0.1:.1f} kg",
+                weight_kg=round(83.0 + offset * 0.1, 2),
+            ),
+        )
+
+    data = get_weight_trend_for_days(conn, days=30)
 
     assert data["count"] == 10
     assert data["points"]
-    # The seeded window ends today, so old logs fall outside it unless recent
     assert "start_date" in data and "end_date" in data
 
 
@@ -536,9 +551,9 @@ def test_dashboard_link_uses_the_configured_address(monkeypatch: pytest.MonkeyPa
         gemini_api_key=None,
         web_host="0.0.0.0",
         web_port=8000,
-        dashboard_url="http://100.118.153.122:8000/",
+        dashboard_url="http://100.64.0.1:8000/",
     )
-    assert configured.dashboard_link == "http://100.118.153.122:8000"
+    assert configured.dashboard_link == "http://100.64.0.1:8000"
 
     monkeypatch.setattr(
         bot_module,
@@ -548,11 +563,11 @@ def test_dashboard_link_uses_the_configured_address(monkeypatch: pytest.MonkeyPa
             foods_data_path=bot_module.settings.foods_data_path,
             log_level="WARNING",
             gemini_api_key=None,
-            dashboard_url="http://100.118.153.122:8000",
+            dashboard_url="http://100.64.0.1:8000",
         ),
     )
     client, _ = bot_module.create_bot()
-    assert bot_module.build_dashboard_view().children[0].url == "http://100.118.153.122:8000"
+    assert bot_module.build_dashboard_view().children[0].url == "http://100.64.0.1:8000"
 
 
 def test_bot_message_content_intent_is_enabled(monkeypatch: pytest.MonkeyPatch):
@@ -569,7 +584,7 @@ def test_application_id_decoded_from_token():
 
     import nutrition_agent.bot as bot_module
 
-    app_id = 1550206419297636394
+    app_id = 123456789012345678
     encoded = base64.b64encode(str(app_id).encode()).decode().rstrip("=")
     token = f"{encoded}.abcdef.ghijklmnopqrstuvwxyz0123456789"
 
