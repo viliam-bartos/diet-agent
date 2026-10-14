@@ -5,7 +5,8 @@ A minimalist diet, macronutrient, body weight, and workout tracking system opera
 Google Gemini Flash (via the official `google-genai` SDK) functions strictly as a stateless natural language parser, converting unstructured text into validated Pydantic models. All nutritional calculations, DIAAS protein bioavailability discounting, dynamic caloric targets, and database operations execute deterministically in local Python against an SQLite database.
 
 ---
-<img width="1606" height="1437" alt="image" src="https://github.com/user-attachments/assets/c11c9eca-fd22-4313-ba77-4668b87f8e2e" />
+<img width="1848" height="1661" alt="100 118 153 122_8000_" src="https://github.com/user-attachments/assets/412bf81c-c895-464e-9805-4958873c7409" />
+
 
 
 ## Engineering Highlights & Reliability
