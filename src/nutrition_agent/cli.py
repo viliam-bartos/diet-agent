@@ -28,6 +28,7 @@ from nutrition_agent.nutrition import (
     calculate_food_log,
     convert_to_grams,
     find_matching_food,
+    names_contradict,
     validate_body_weight,
 )
 from nutrition_agent.reporting import format_daily_target_breakdown, generate_period_report
@@ -103,16 +104,26 @@ def resolve_food(
 
     # The model names a food the way the catalog usually does ('eidam 30' comes back
     # as 'eidam 30%'), so an estimate that already exists in the catalog is used
-    # instead of being stored as a second, differently valued entry.
-    try:
-        existing, _ = find_matching_food(estimate.name, foods)
-    except FoodNotFoundError:
-        existing = None
-    if existing is not None:
-        logger.info("Odhad '%s' odpovídá katalogové potravině '%s'.", estimate.name, existing.name)
-        return existing, False
+    # instead of being stored as a second, differently valued entry. When the model
+    # dropped or changed a variant the user stated, that mapping is refused: 'gouda 48%'
+    # must not be answered with the 45% entry.
+    if not names_contradict(food_name, estimate.name):
+        try:
+            existing, _ = find_matching_food(estimate.name, foods)
+        except FoodNotFoundError:
+            existing = None
+        if existing is not None:
+            logger.info(
+                "Odhad '%s' odpovídá katalogové potravině '%s'.", estimate.name, existing.name
+            )
+            return existing, False
 
     learned = build_food_from_estimate(estimate)
+    if names_contradict(food_name, learned.name):
+        # Keep the wording that carries the variant, otherwise the learned food would
+        # answer to the wrong product next time.
+        learned = learned.model_copy(update={"name": " ".join(food_name.lower().split())})
+
     save_learned_food(conn, learned)
     return learned, True
 

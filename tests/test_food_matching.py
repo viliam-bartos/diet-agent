@@ -4,9 +4,11 @@ import pytest
 
 from nutrition_agent.models import FoodDefinition
 from nutrition_agent.nutrition import (
+    fat_variant_classes,
     find_matching_food,
     food_tokens,
     is_token_subset,
+    names_contradict,
     quantity_tokens,
     strip_diacritics,
 )
@@ -146,3 +148,89 @@ def test_duplicate_number_lookalike_does_not_match():
     foods = [_food("eidam 30%", source="ai")]
     with pytest.raises(FoodNotFoundError):
         find_matching_food("eidam 45%", foods)
+
+
+def test_fat_variant_classes_are_three_products():
+    """'polotučné', 'plnotučné' and 'odtučněné' are variants, not spellings."""
+    assert fat_variant_classes("mléko polotučné") == {"semi"}
+    assert fat_variant_classes("plnotučné mléko") == {"full"}
+    assert fat_variant_classes("tvaroh odtučněný") == {"low"}
+    assert fat_variant_classes("jogurt nízkotučný") == {"low"}
+    assert fat_variant_classes("mléko") == set()
+    # Without diacritics the same rules apply.
+    assert fat_variant_classes("mleko polotucne") == {"semi"}
+
+
+def test_fat_variant_must_agree_with_the_candidate():
+    """'mléko polotučné' must not be logged as 'plnotučné mléko'.
+
+    The two names differ by one letter and score above 90 % with a string metric, but
+    the products differ by grams of fat per 100 ml.
+    """
+    from nutrition_agent.models import FoodNotFoundError
+
+    foods = [_food("plnotučné mléko", source="ai")]
+    with pytest.raises(FoodNotFoundError):
+        find_matching_food("mléko polotučné", foods)
+
+    # The same variant matches, in either word order.
+    assert find_matching_food("plnotučné mléko", foods)[0].name == "plnotučné mléko"
+    assert find_matching_food("mléko plnotučné", foods)[0].name == "plnotučné mléko"
+
+
+def test_low_fat_variant_does_not_match_a_semi_fat_candidate():
+    """Odtučněný tvaroh is not polotučný tvaroh either."""
+    from nutrition_agent.models import FoodNotFoundError
+
+    foods = [_food("Tvaroh polotučný"), _food("Tvaroh odtučněný")]
+    assert find_matching_food("tvaroh odtučněný", foods)[0].name == "Tvaroh odtučněný"
+    assert find_matching_food("tvaroh polotučný", foods)[0].name == "Tvaroh polotučný"
+
+    with pytest.raises(FoodNotFoundError):
+        find_matching_food("tvaroh plnotučný", foods)
+
+
+def test_names_contradict_reports_both_kinds_of_variant():
+    """The check covers numbers and fat classes, and allows a silent candidate."""
+    assert names_contradict("gouda 48%", "gouda 45%") is True
+    assert names_contradict("gouda 48%", "gouda 48%") is False
+    assert names_contradict("eidam 30", "Eidam 30% tuku v sušině") is False
+    assert names_contradict("mléko polotučné", "plnotučné mléko") is True
+    assert names_contradict("mléko polotučné", "mléko polotučné 1,5%") is False
+    # A candidate that states no variant does not contradict one.
+    assert names_contradict("mléko polotučné", "mléko") is False
+
+
+def test_estimate_cannot_rewrite_a_stated_variant(monkeypatch: pytest.MonkeyPatch):
+    """The model's answer must not talk the user into another product.
+
+    'gouda 48%' estimated as 'gouda 45%' keeps the user's wording, so the catalog and
+    the log answer to the right variant.
+    """
+    import nutrition_agent.cli as cli_module
+    from nutrition_agent.db import SCHEMA_SQL, get_connection
+    from nutrition_agent.models import EstimatedFoodNutrition
+    from nutrition_agent.repository import get_food
+
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+    foods = [_food("gouda 45%", calories=356.0)]
+
+    def fake_estimate(name: str, **kwargs) -> EstimatedFoodNutrition:
+        return EstimatedFoodNutrition(
+            name="gouda 45%",
+            calories=356.0,
+            protein=25.0,
+            carbs=0.0,
+            fats=27.0,
+            protein_category="animal",
+        )
+
+    monkeypatch.setattr(cli_module, "estimate_food_nutrition", fake_estimate)
+
+    learned, was_learned = cli_module.resolve_food(conn, "gouda 48%", foods)
+
+    assert was_learned is True
+    assert learned.name == "gouda 48%"
+    assert get_food(conn, "gouda 48%") is not None
+

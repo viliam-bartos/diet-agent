@@ -203,6 +203,47 @@ def quantity_tokens(name: str) -> set[str]:
     return {f"{float(raw.replace(',', '.')):g}" for raw in NUMBER_PATTERN.findall(name)}
 
 
+# Fat-content variants: three classes of product, not three spellings of one.
+# Folded, because names are compared without diacritics.
+FAT_VARIANT_CLASSES: dict[str, frozenset[str]] = {
+    "low": frozenset({"odtucnene", "odtucneny", "odtucnena", "nizkotucne", "nizkotucny"}),
+    "semi": frozenset({"polotucne", "polotucny", "polotucna"}),
+    "full": frozenset({"plnotucne", "plnotucny", "plnotucna"}),
+}
+
+FAT_VARIANT_TOKENS: dict[str, str] = {
+    token: variant for variant, tokens in FAT_VARIANT_CLASSES.items() for token in tokens
+}
+
+
+def fat_variant_classes(name: str) -> set[str]:
+    """Return the fat-content variants a food name belongs to ('low', 'semi', 'full').
+
+    'mléko polotučné' is one letter away from 'plnotučné mléko' and scores high with any
+    string metric, but the two products differ by grams of fat per 100 ml.
+    """
+    return {FAT_VARIANT_TOKENS[token] for token in food_tokens(name) if token in FAT_VARIANT_TOKENS}
+
+
+def names_contradict(query: str, candidate: str) -> bool:
+    """Report whether the two names promise different variants of the same food.
+
+    A number ('gouda 45%') or a fat variant ('mléko polotučné') in the query is a claim
+    about the product. A candidate that states another number or another fat class is a
+    different product, no matter how similar the two names look.
+    """
+    query_numbers = quantity_tokens(query)
+    candidate_numbers = quantity_tokens(candidate)
+    if query_numbers and candidate_numbers and not query_numbers <= candidate_numbers:
+        return True
+
+    query_classes = fat_variant_classes(query)
+    candidate_classes = fat_variant_classes(candidate)
+    return bool(
+        query_classes and candidate_classes and query_classes.isdisjoint(candidate_classes)
+    )
+
+
 def is_token_subset(query: str, candidate: str) -> bool:
     """Report whether every word of the query appears in the candidate name.
 
@@ -227,8 +268,9 @@ def find_matching_food(
           by token_sort_ratio so an uncertain mapping is logged as such.
         - Otherwise: rejected with FoodNotFoundError (Fail Fast).
 
-    A stated number identifies a variant, so a candidate whose numbers contradict
-    the query is never accepted: 'eidam 45%' must not be logged as 'eidam 30%'.
+    A stated number or fat variant identifies a product variant, so a candidate that
+    contradicts it is never accepted: 'eidam 45%' must not be logged as 'eidam 30%' and
+    'mléko polotučné' must not be logged as 'plnotučné mléko'.
 
     A curated catalog entry always wins over an AI-estimated one whenever both are
     acceptable, so an estimate can never shadow a verified food.
@@ -251,7 +293,6 @@ def find_matching_food(
     acceptable: list[tuple[FoodDefinition, float, bool]] = []
     best_food: FoodDefinition | None = None
     best_score: float = -1.0
-    query_numbers = quantity_tokens(matched_query)
 
     for food in foods:
         candidate_name = food.name.strip().lower()
@@ -261,8 +302,7 @@ def find_matching_food(
             best_score = score
             best_food = food
 
-        candidate_numbers = quantity_tokens(candidate_name)
-        if query_numbers and candidate_numbers and not query_numbers <= candidate_numbers:
+        if names_contradict(matched_query, candidate_name):
             continue
 
         contained = is_token_subset(matched_query, candidate_name)

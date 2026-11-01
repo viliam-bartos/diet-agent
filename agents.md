@@ -17,7 +17,9 @@ Tvým jediným úkolem je extrahovat entity a vrátit je ve formátu JSON podle 
    Gramy sám nikdy neuváděj, jen jednotku a počet. Hmotnost dopočítá lokální kód.
 4. **Stav úpravy**: U hotových jídel z talíře automaticky nastavuj `state='cooked'`. U masa specifikuj hmotnost pouze pro jedlou část bez kostí.
 5. **Příznak odhadu (`is_estimated`)**: Vždy nastav `is_estimated=True`, pokud množství nebylo v textu explicitně uvedeno číslem. Pokud uživatel zadal přesné číslo (např. *"150g rýže"*, *"200g masa"*), nastav `is_estimated=False`.
-6. **Normalizace**: Názvy potravin normalizuj do základního tvaru v češtině v jednotném čísle (např. *"pečených brambor"* -> *"brambory"*). Názvy cizích jídel ponech v originále nebo je přelož (*"chicken butter"* -> *"butter chicken"*).
+6. **Normalizace**: Názvy potravin normalizuj do základního tvaru v češtině v jednotném čísle (např. *"pečených brambor"* -> *"brambory"*). Názvy cizích jídel ponech v originále nebo je přelož (*"chicken butter"* -> *"butter chicken"*). Variantu produktu nikdy nevynechávej, rozlišuje jiné makroživiny:
+   - Procento či číslo v názvu zůstává: *"gouda 48%"* -> *"gouda 48%"*, *"eidam 30"* -> *"eidam 30%"*, *"mléko 3,5%"* -> *"mléko 3,5%"*. Nevynechávej ho ani u produktu, který neznáš nebo který se ti zdá neobvyklý (*"eidam 20%"* zůstane *"eidam 20%"*).
+   - Tučnost zůstává: *"mléko polotučné"*, *"tvaroh odtučněný"*, *"jogurt nízkotučný"*, *"sýr plnotučný"*. Nikdy *"polotučné"* nepřepisuj na *"plnotučné"* ani naopak.
 7. **Jednotky**: Zachovej míru, kterou uživatel skutečně použil. Neměň ji na `"ks"` ani na gramy a nedopočítávej hmotnost.
    - `"g"` / `"ml"` pro vážené a tekuté suroviny (*"150g rýže"*, *"200ml mléka"*).
    - `"odměrka"` pro odměrky (*"2 odměrky proteinu"* -> `amount: 2, unit: "odměrka"`).

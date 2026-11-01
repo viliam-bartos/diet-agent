@@ -40,6 +40,11 @@ Pravidla chování:
    uvedeno číslem. Pokud uživatel zadal přesné číslo (např. '150g rýže'), nastav is_estimated=False.
 6. Normalizace: Názvy potravin normalizuj do základního tvaru v češtině v jednotném čísle.
    Názvy cizích jídel ponech v originále nebo je přelož ('chicken butter' -> 'butter chicken').
+   Variantu produktu NIKDY nevynechávej, rozlišuje jiné makroživiny:
+   - Procento či číslo v názvu zůstává ('gouda 48%' -> 'gouda 48%', 'eidam 30' -> 'eidam 30%',
+     'mléko 3,5%' -> 'mléko 3,5%'), i když se ti zdá neobvyklé nebo když takový produkt neznáš.
+   - Tučnost zůstává ('mléko polotučné', 'tvaroh odtučněný', 'jogurt nízkotučný',
+     'sýr plnotučný'). Nikdy 'polotučné' nepřepisuj na 'plnotučné' ani naopak.
 7. Jednotky: Zachovej míru, kterou uživatel skutečně použil. Neměň ji na 'ks' ani na gramy.
    - 'g' nebo 'ml' pro vážené a tekuté suroviny ('150g rýže', '200ml mléka').
    - 'odměrka' pro odměrky ('2 odměrky proteinu' -> amount: 2, unit: 'odměrka').
