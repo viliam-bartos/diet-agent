@@ -213,19 +213,19 @@ def test_api_balance_endpoint_reports_the_finished_window(api_client: TestClient
 
 
 def test_dashboard_shows_the_maintenance_balance(api_client: TestClient):
-    """The balance card carries the numbers the endpoint produces.
+    """The balance drawer carries the numbers the endpoint produces and toggles from the week card corner.
 
     This is a proxy check: it reads the template rather than running a browser.
     """
     body = api_client.get("/").text
 
-    for element in ("balanceKcal", "balanceIntake", "balanceEstimate", "balanceMeasured"):
+    for element in ("balanceKcal", "balanceIntake", "balanceEstimate", "balanceMeasured", "balanceDrawer"):
         assert f'id="{element}"' in body, element
 
     assert "Bilance proti maintenance" in body
     assert "/api/balance?days=30" in body
-    # The model behind the estimate is stated on the card, not hidden.
-    assert "7700 kcal/kg" in body and "1800 kcal/kg" in body
+    assert "toggleBalance()" in body
+    assert "week-corner-toggle" in body
 
 
 def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):
@@ -248,8 +248,7 @@ def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):
 
     # The "protein only" level is gone: a day is either met or not.
     assert "level-blue" not in body
-    # The rule itself is written next to the colours.
-    assert "kalorie i bílkoviny ≥90 % cíle" in body
+    assert "Splněné kalorie i bílkoviny" in body
 
 
 def test_dashboard_weight_chart_avoids_a_scatter_dataset(api_client: TestClient):

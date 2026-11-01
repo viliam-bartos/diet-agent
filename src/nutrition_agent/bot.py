@@ -241,17 +241,9 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
             else:
                 meals_text = "Dnes zatím nebyla zaznamenána žádná jídla."
 
-            day_met = (
-                targets.calories > 0
-                and total_cal >= targets.calories * 0.90
-                and targets.protein_usable > 0
-                and total_prot >= targets.protein_usable * 0.90
-            )
-            embed_color = discord.Color.green() if day_met else discord.Color.gold()
-
             embed = discord.Embed(
-                title=f"Denní přehled ({today_str})" + (" [CÍL SPLNĚN]" if day_met else ""),
-                color=embed_color,
+                title=f"Denní přehled ({today_str})",
+                color=discord.Color.blue(),
                 timestamp=datetime.now(),
             )
             embed.add_field(name="Hmotnost", value=weight_val, inline=True)

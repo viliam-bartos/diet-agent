@@ -43,9 +43,8 @@
 
       --valve-orange: #F05A22;
       --valve-orange-glow: rgba(240, 90, 34, 0.15);
-      --status-green: #38A169;
-      --status-green-glow: rgba(56, 161, 105, 0.18);
-      --status-green-dark: #2F855A;
+      --aperture-cyan: #00A3E0;
+      --aperture-cyan-glow: rgba(0, 163, 224, 0.15);
       --terminal-amber: #D98200;
 
       --font-display: 'Barlow Semi Condensed', -apple-system, sans-serif;
@@ -258,9 +257,8 @@
       transition: width 0.25s ease-out;
     }
 
-    .kpi-bar-fill.met,
     .kpi-bar-fill.over {
-      background: var(--status-green);
+      background: var(--aperture-cyan);
     }
 
     .kpi-bar-fill.empty {
@@ -619,6 +617,63 @@
       padding: 18px;
       margin-bottom: 28px;
       box-shadow: 3px 3px 0px rgba(24, 24, 26, 0.8);
+      position: relative;
+    }
+
+    .week-corner-toggle {
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      z-index: 2;
+    }
+
+    .week-corner-toggle:hover {
+      background: transparent;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .week-corner-toggle.corner-tr {
+      top: 0;
+      right: 0;
+      background: linear-gradient(225deg, var(--bg-cardboard-dark) 50%, transparent 50%);
+      border-bottom: 1px solid rgba(24, 24, 26, 0.25);
+      border-left: 1px solid rgba(24, 24, 26, 0.25);
+    }
+
+    .week-corner-toggle.corner-tr:hover,
+    .week-card.balance-open .week-corner-toggle.corner-tr {
+      background: linear-gradient(225deg, var(--valve-orange) 50%, transparent 50%);
+    }
+
+    .week-corner-toggle.corner-br {
+      bottom: 0;
+      right: 0;
+    }
+
+    .week-corner-toggle.corner-tl {
+      top: 0;
+      left: 0;
+    }
+
+    .week-corner-toggle.corner-bl {
+      bottom: 0;
+      left: 0;
+    }
+
+    .week-balance-drawer {
+      display: none;
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: var(--border-subtle);
+    }
+
+    .week-card.balance-open .week-balance-drawer {
+      display: block;
     }
 
     .week-headline {
@@ -636,11 +691,11 @@
     }
 
     .week-balance.surplus {
-      color: var(--status-green-dark);
+      color: var(--valve-orange);
     }
 
     .week-balance.deficit {
-      color: var(--ink-secondary);
+      color: var(--aperture-cyan);
     }
 
     .week-balance.neutral {
@@ -669,7 +724,6 @@
       flex-wrap: wrap;
     }
 
-    /* Balance against maintenance: three short columns and a model note. */
     .balance-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -708,11 +762,11 @@
     }
 
     .week-day .wd-delta.pos {
-      color: var(--status-green-dark);
+      color: var(--valve-orange);
     }
 
     .week-day .wd-delta.neg {
-      color: var(--ink-secondary);
+      color: var(--aperture-cyan);
     }
 
     .week-day .wd-workout {
@@ -792,9 +846,9 @@
       outline-offset: 1px;
     }
 
-    /* Day detail panel - Seznam jídel za ten den */
+    /* Day detail panel */
     .day-panel {
-      display: block;
+      display: none;
       background: var(--bg-sheet);
       border: var(--border-technical);
       padding: 22px;
@@ -802,13 +856,17 @@
       box-shadow: 4px 4px 0px rgba(24, 24, 26, 0.8);
     }
 
+    .day-panel.open {
+      display: block;
+    }
+
     .day-panel-header {
       display: flex;
       justify-content: space-between;
-      align-items: flex-start;
+      align-items: center;
       gap: 16px;
       margin-bottom: 16px;
-      padding-bottom: 12px;
+      padding-bottom: 10px;
       border-bottom: var(--border-subtle);
       flex-wrap: wrap;
     }
@@ -818,48 +876,13 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 6px;
-    }
-
-    .day-status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 2px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.5px;
-    }
-
-    .day-status-pill.green {
-      background: #DEF7EC;
-      color: #03543F;
-      border: 1px solid #31C48D;
-    }
-
-    .day-status-pill.amber {
-      background: #FEEBC8;
-      color: #7B341E;
-      border: 1px solid #F6AD55;
-    }
-
-    .day-status-pill.empty {
-      background: #E6DFC5;
-      color: var(--ink-secondary);
-      border: 1px solid rgba(24, 24, 26, 0.2);
     }
 
     .day-panel-totals {
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--ink-secondary);
-      line-height: 1.8;
+      line-height: 1.7;
     }
 
     .day-item {
@@ -867,7 +890,7 @@
       justify-content: space-between;
       align-items: center;
       gap: 14px;
-      padding: 10px 0;
+      padding: 8px 0;
       border-bottom: var(--border-subtle);
       font-size: 14px;
       flex-wrap: wrap;
@@ -877,7 +900,7 @@
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--ink-muted);
-      min-width: 48px;
+      min-width: 46px;
     }
 
     .day-item-name {
@@ -914,20 +937,15 @@
       font-family: var(--font-mono);
       font-size: 13px;
       color: var(--ink-muted);
-      padding: 14px 0;
+      padding: 10px 0;
     }
 
-    .kpi-badge-met {
-      color: #2F855A;
-      font-weight: 700;
-    }
-
-    /* Balance buttons & details */
+    /* Balance buttons */
     .balance-btn-group {
       display: flex;
       gap: 6px;
       margin-top: 10px;
-      margin-bottom: 12px;
+      margin-bottom: 4px;
       flex-wrap: wrap;
     }
 
@@ -943,16 +961,6 @@
     .balance-btn.active {
       background: var(--ink-primary);
       color: var(--bg-paper);
-    }
-
-    .balance-details-box {
-      background: var(--bg-paper);
-      border: var(--border-subtle);
-      padding: 12px 14px;
-      margin-top: 14px;
-      font-family: var(--font-mono);
-      font-size: 12px;
-      line-height: 1.6;
     }
 
     /* A broken render must say so instead of leaving empty cards behind. */
@@ -983,7 +991,7 @@
       <div class="brand-title">NUTRIČNÍ DENÍK</div>
       <div class="status-badge">
         <span class="badge-dot"></span>
-        <span id="activeGoalDisplay">LEAN_BULK // TRAINING</span>
+        <span id="activeGoalDisplay">LEAN BULK // TRAINING</span>
       </div>
     </header>
 
@@ -1036,7 +1044,11 @@
     </div>
 
     <!-- Weekly balance -->
-    <div class="week-card">
+    <div class="week-card" id="weekCard">
+      <button type="button" class="week-corner-toggle corner-tr" onclick="toggleBalance()" title="Bilance proti maintenance" aria-label="Bilance proti maintenance"></button>
+      <button type="button" class="week-corner-toggle corner-br" onclick="toggleBalance()" title="Bilance proti maintenance" aria-label="Bilance proti maintenance"></button>
+      <button type="button" class="week-corner-toggle corner-tl" onclick="toggleBalance()" title="Bilance proti maintenance" aria-label="Bilance proti maintenance"></button>
+      <button type="button" class="week-corner-toggle corner-bl" onclick="toggleBalance()" title="Bilance proti maintenance" aria-label="Bilance proti maintenance"></button>
       <div class="week-headline">
         <div>
           <div class="kpi-label" id="weekLabel">Týden</div>
@@ -1046,41 +1058,37 @@
       </div>
       <!-- g DIAAS<br> Bílkoviny celkem: -->
       <div class="week-days" id="weekDays"></div>
-    </div>
 
-    <!-- Balance against maintenance -->
-    <div class="dashboard-section">
-      <div class="section-header">
-        <div>
-          <div class="section-title" id="balanceLabel">Bilance proti maintenance</div>
-          <div class="balance-btn-group">
-            <button type="button" class="balance-btn active" id="balBtnLatest" onclick="changeBalancePeriod('latest')">Poslední aktivní období</button>
-            <button type="button" class="balance-btn" id="balBtnMonth" onclick="changeBalancePeriod('month')">Září 2026</button>
-            <button type="button" class="balance-btn" id="balBtnCurrent" onclick="changeBalancePeriod('current')">Posledních 30 dní</button>
+      <!-- Balance against maintenance (expandable from corner) -->
+      <div class="week-balance-drawer" id="balanceDrawer">
+        <div class="section-header" style="margin-bottom: 14px;">
+          <div>
+            <div class="section-title" id="balanceLabel">Bilance proti maintenance</div>
+            <div class="balance-btn-group">
+              <button type="button" class="balance-btn active" id="balBtnLatest" onclick="changeBalancePeriod('latest')">Poslední aktivní období</button>
+              <button type="button" class="balance-btn" id="balBtnMonth" onclick="changeBalancePeriod('month')">Září 2026</button>
+              <button type="button" class="balance-btn" id="balBtnCurrent" onclick="changeBalancePeriod('current')">Posledních 30 dní</button>
+            </div>
+          </div>
+          <div class="kpi-value" style="margin: 0; font-size: 22px;">
+            <span id="balanceKcal">--</span> <span class="kpi-unit">kcal</span>
           </div>
         </div>
-        <div class="kpi-value" style="margin: 0; font-size: 22px;">
-          <span id="balanceKcal">--</span> <span class="kpi-unit">kcal</span>
+        <div class="balance-grid">
+          <div>
+            <div class="kpi-label">Příjem / maintenance</div>
+            <div class="kpi-subtext" id="balanceIntake">--</div>
+          </div>
+          <div>
+            <div class="kpi-label">Odhad hmoty (svaly / tuk)</div>
+            <div class="kpi-subtext" id="balanceEstimate">--</div>
+          </div>
+          <div>
+            <div class="kpi-label">Skutečná váha / odchylka</div>
+            <div class="kpi-subtext" id="balanceMeasured">--</div>
+          </div>
         </div>
       </div>
-      <div class="balance-grid">
-        <div>
-          <div class="kpi-label">Příjem / maintenance</div>
-          <div class="kpi-subtext" id="balanceIntake">--</div>
-        </div>
-        <div>
-          <div class="kpi-label">Odhad hmoty (svaly / tuk)</div>
-          <div class="kpi-subtext" id="balanceEstimate">--</div>
-        </div>
-        <div>
-          <div class="kpi-label">Skutečná váha / odchylka</div>
-          <div class="kpi-subtext" id="balanceMeasured">--</div>
-        </div>
-      </div>
-      <div class="balance-details-box" id="balanceDeviationBox">
-        <span id="balanceDeviationText">--</span>
-      </div>
-      <div class="kpi-subtext" id="balanceNote" style="margin-top: 10px;"></div>
     </div>
 
     <!-- Weight Trend Chart -->
@@ -1113,10 +1121,10 @@
       </div>
       <div class="heatmap-legend">
         <div class="legend-item">
-          <div class="legend-box level-green"></div> Splněno: kalorie i bílkoviny ≥90 % cíle (zelená)
+          <div class="legend-box level-green"></div> Splněné kalorie i bílkoviny
         </div>
         <div class="legend-item">
-          <div class="legend-box level-amber"></div> Záznam, ale pod 90 % u kalorií nebo bílkovin
+          <div class="legend-box level-amber"></div> Záznam pod cílem
         </div>
         <div class="legend-item">
           <div class="legend-box level-empty"></div> Bez záznamu
@@ -1127,14 +1135,14 @@
       </div>
     </div>
 
-    <!-- Selected day detail (Seznam jídel za den) -->
+    <!-- Selected day detail -->
     <div id="dayPanel" class="day-panel">
       <div class="day-panel-header">
         <div>
-          <div class="day-panel-title" id="dayPanelTitle">Seznam jídel za den</div>
+          <div class="day-panel-title" id="dayPanelTitle">Záznam</div>
           <div class="day-panel-totals" id="dayPanelTotals"></div>
         </div>
-        <button type="button" id="dayPanelResetBtn" onclick="clearSelectedDay()" style="display: none;">Zpět na dnešek</button>
+        <button type="button" onclick="closeDayPanel()">Zavřít</button>
       </div>
       <div id="dayPanelItems"></div>
     </div>
@@ -1238,6 +1246,11 @@
 
     let currentBalancePeriod = 'latest';
 
+    function toggleBalance() {
+      const card = document.getElementById('weekCard');
+      if (card) card.classList.toggle('balance-open');
+    }
+
     async function changeBalancePeriod(period) {
       currentBalancePeriod = period;
       const btnLatest = document.getElementById('balBtnLatest');
@@ -1276,15 +1289,14 @@
 
         const estimate = data.estimated_kg;
         document.getElementById('balanceEstimate').textContent = data.logged_days
-          ? `${estimate > 0 ? '+' : ''}${estimate.toFixed(2)} kg ` +
-            `(${data.surplus
-              ? `svaly ${data.estimated_lean_kg.toFixed(2)} kg + tuk ${data.estimated_fat_kg.toFixed(2)} kg`
-              : 'převážně tuk'}, ${Math.round(data.kcal_per_kg)} kcal/kg)`
+          ? `${estimate > 0 ? '+' : ''}${estimate.toFixed(2)} kg` +
+            (data.surplus
+              ? ` (svaly ${data.estimated_lean_kg.toFixed(2)} kg, tuk ${data.estimated_fat_kg.toFixed(2)} kg)`
+              : '')
           : 'bez záznamu';
 
         if (data.measured_kg === null) {
-          document.getElementById('balanceMeasured').textContent =
-            'nelze změřit: chybí dvě vážení v okně';
+          document.getElementById('balanceMeasured').textContent = '--';
         } else {
           const percent = data.deviation_percent;
           const startWeight = data.first_weight_kg != null ? `${data.first_weight_kg.toFixed(1)} kg` : '';
@@ -1295,24 +1307,6 @@
             `odchylka ${data.deviation_kg > 0 ? '+' : ''}${data.deviation_kg.toFixed(2)} kg` +
             (percent !== null ? ` (${percent > 0 ? '+' : ''}${percent.toFixed(0)} %)` : '');
         }
-
-        const devBox = document.getElementById('balanceDeviationBox');
-        const devText = document.getElementById('balanceDeviationText');
-        if (devBox && devText) {
-          if (data.deviation_note) {
-            devText.textContent = data.deviation_note;
-            devBox.style.display = 'block';
-          } else if (data.measured_kg !== null && data.deviation_kg !== null) {
-            devText.textContent = `Odchylka modelu od reálné váhy: ${data.deviation_kg > 0 ? '+' : ''}${data.deviation_kg.toFixed(2)} kg.`;
-            devBox.style.display = 'block';
-          } else {
-            devBox.style.display = 'none';
-          }
-        }
-
-        document.getElementById('balanceNote').textContent = data.warnings.length
-          ? data.warnings.join(' ')
-          : 'Odhad podle modelu: tuk 7700 kcal/kg, svaly 1800 kcal/kg, 70 % hmoty do svalů.';
       } catch (err) {
         console.error('Chyba při načítání bilance:', err);
         showError(`Nepodařilo se načíst bilanci proti maintenance: ${err}`);
@@ -1420,19 +1414,14 @@
 
       const percent = (consumed / target) * 100;
       bar.style.width = `${Math.min(percent, 100)}%`;
-      const isMet = percent >= 90;
-      bar.className = 'kpi-bar-fill' + (isMet ? ' met' : '');
+      bar.className = 'kpi-bar-fill' + (percent > 105 ? ' over' : '');
 
       const remaining = target - consumed;
       const left = remaining >= 0
         ? `zbývá ${remaining.toFixed(decimals)}`
         : `překročeno o ${Math.abs(remaining).toFixed(decimals)}`;
-      const statusPill = isMet
-        ? `<span class="kpi-badge-met">✓ Splněno (${percent.toFixed(0)} %)</span>`
-        : `<span>${percent.toFixed(0)} %</span>`;
-
-      targetEl.innerHTML =
-        `Cíl: ${target.toFixed(decimals)} ${unit} | ${statusPill} | ${left}` +
+      targetEl.textContent =
+        `Cíl: ${target.toFixed(decimals)} ${unit} | ${percent.toFixed(0)} % | ${left}` +
         (note ? ` | ${note}` : '');
     }
 
@@ -1443,19 +1432,8 @@
 
         if (!checkVersion(data, REQUIRED_DAY_FIELDS)) return;
 
-        const calsMet = data.target_calories > 0 && (data.calories / data.target_calories) >= 0.90;
-        const protMet = data.target_protein > 0 && (data.protein_usable / data.target_protein) >= 0.90;
-        const dayMet = calsMet && protMet;
-
-        const goalDisplay = document.getElementById('activeGoalDisplay');
-        const badgeDot = document.querySelector('.badge-dot');
-        if (dayMet) {
-          if (badgeDot) badgeDot.style.background = '#38A169';
-          goalDisplay.innerHTML = `${data.goal.toUpperCase()} // ${data.day_type.toUpperCase()} <span style="color: #2F855A; margin-left: 6px; font-weight: 700;">[CELÝ DEN SPLNĚN ✓]</span>`;
-        } else {
-          if (badgeDot) badgeDot.style.background = 'var(--valve-orange)';
-          goalDisplay.textContent = `${data.goal.toUpperCase()} // ${data.day_type.toUpperCase()}`;
-        }
+        document.getElementById('activeGoalDisplay').textContent =
+          `${data.goal.replace(/_/g, ' ').toUpperCase()} // ${data.day_type.toUpperCase()}`;
 
         renderMacroCard('kpiCals', 'kpiCalsBar', 'kpiCalsTarget',
           data.calories, data.target_calories, 'kcal', 0);
@@ -1691,20 +1669,10 @@
             (c.has_workout ? ' has-workout' : '') +
             (c.date === selectedDay ? ' selected' : '') +
             (c.date === today ? ' today' : '');
-          const kcalPct = c.target_calories
-            ? Math.round((c.calories / c.target_calories) * 100) : 0;
-          const proteinPct = c.target_protein
-            ? Math.round((c.protein_usable / c.target_protein) * 100) : 0;
-          const verdict = c.level === 'green'
-            ? 'splněno (≥90 % u obou)'
-            : c.level === 'empty'
-              ? 'bez záznamu'
-              : 'pod cílem (alespoň jedno <90 %)';
           cellEl.title =
             `${formatDate(c.date)} (${c.day_type === 'training' ? 'trénink' : 'odpočinek'})\n` +
-            `${verdict}\n` +
-            `Energie: ${c.calories} / ${c.target_calories} kcal (${kcalPct} %)\n` +
-            `Bílkoviny: ${c.protein_usable} / ${c.target_protein} g DIAAS (${proteinPct} %)\n` +
+            `Energie: ${c.calories} / ${c.target_calories} kcal\n` +
+            `Bílkoviny: ${c.protein_usable} / ${c.target_protein} g DIAAS\n` +
             `Sacharidy: ${c.carbs} g | Tuky: ${c.fats} g` +
             (c.has_workout ? `\nTrénink: ${c.workout_type}` : '');
           cellEl.onclick = () => selectDay(c.date === selectedDay ? '' : c.date);
@@ -1721,44 +1689,24 @@
       // leave the "writing on <date>" hint and its way back on screen.
       selectedDay = day === todayIso() ? '' : day;
       await Promise.all([loadDay(), loadHeatmap(), loadWeek()]);
-      // The panel always shows the day that is being written to, today by default.
-      await showDayPanel(day || todayIso());
+      if (day) {
+        await showDayPanel(day);
+      } else {
+        closeDayPanel();
+      }
     }
 
     async function showDayPanel(day) {
       const data = await (await fetch(`/api/day?date=${day}`)).json();
       const panel = document.getElementById('dayPanel');
-      const verdict = data.adherence || {};
 
-      const titleEl = document.getElementById('dayPanelTitle');
-      let statusPillHtml = '';
-      if (verdict.level === 'green') {
-        statusPillHtml = '<span class="day-status-pill green">✓ Celý den splněn (≥90 % kcal i bílkoviny)</span>';
-      } else if (verdict.level === 'amber') {
-        statusPillHtml = '<span class="day-status-pill amber">Pod cílem (&lt;90 % kcal nebo bílkovin)</span>';
-      } else {
-        statusPillHtml = '<span class="day-status-pill empty">Bez záznamu</span>';
-      }
-      const dayTypeDesc = data.day_type === 'training' ? 'Tréninkový den' : 'Odpočinkový den';
-      titleEl.innerHTML = `<span>Jídelníček: ${formatDate(day)} (${dayTypeDesc})</span> ${statusPillHtml}`;
-
-      const resetBtn = document.getElementById('dayPanelResetBtn');
-      if (resetBtn) {
-        resetBtn.style.display = (day && day !== todayIso()) ? 'inline-block' : 'none';
-      }
-
-      const kcalPct = data.target_calories > 0 ? Math.round((data.calories / data.target_calories) * 100) : 0;
-      const protPct = data.target_protein > 0 ? Math.round((data.protein_usable / data.target_protein) * 100) : 0;
-      const kcalColor = kcalPct >= 90 ? 'color: #2F855A; font-weight: 700;' : '';
-      const protColor = protPct >= 90 ? 'color: #2F855A; font-weight: 700;' : '';
-
+      document.getElementById('dayPanelTitle').textContent = `Záznam pro ${formatDate(day)}`;
       document.getElementById('dayPanelTotals').innerHTML =
-        `<span style="${kcalColor}">Kalorie: ${Math.round(data.calories)} / ${Math.round(data.target_calories)} kcal (${kcalPct} %)</span> &bull; ` +
-        `<span style="${protColor}">Bílkoviny: ${data.protein_usable.toFixed(1)} / ${data.target_protein.toFixed(1)} g DIAAS (${protPct} %)</span> &bull; ` +
-        `<span>Sacharidy: ${data.carbs.toFixed(1)} g</span> &bull; ` +
-        `<span>Tuky: ${data.fats.toFixed(1)} g</span>` +
-        (data.weight_kg != null ? ` &bull; <span>Váha: ${data.weight_kg.toFixed(1)} kg</span>` : '') +
-        (data.has_workout ? ` &bull; <span>Trénink: ${data.workout_type || 'Ano'}</span>` : '');
+        `${Math.round(data.calories)} / ${Math.round(data.target_calories)} kcal | ` +
+        `${data.protein_usable.toFixed(1)} / ${data.target_protein.toFixed(1)} g DIAAS | ` +
+        `${data.carbs.toFixed(1)} g sacharidů | ${data.fats.toFixed(1)} g tuků` +
+        (data.weight_kg != null ? `<br>Váha: ${data.weight_kg.toFixed(1)} kg` : '') +
+        (data.has_workout ? `<br>Trénink: ${data.workout_type}` : '');
 
       const itemsEl = document.getElementById('dayPanelItems');
       itemsEl.innerHTML = '';
