@@ -726,7 +726,7 @@
 
     .balance-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 18px;
     }
 
@@ -848,16 +848,12 @@
 
     /* Day detail panel */
     .day-panel {
-      display: none;
+      display: block;
       background: var(--bg-sheet);
       border: var(--border-technical);
       padding: 22px;
       margin-bottom: 28px;
       box-shadow: 4px 4px 0px rgba(24, 24, 26, 0.8);
-    }
-
-    .day-panel.open {
-      display: block;
     }
 
     .day-panel-header {
@@ -1087,6 +1083,13 @@
             <div class="kpi-label">Skutečná váha / odchylka</div>
             <div class="kpi-subtext" id="balanceMeasured">--</div>
           </div>
+          <div>
+            <div class="kpi-label">Nový maintenance (7 vážení)</div>
+            <div class="kpi-subtext">
+              <span id="balanceCalibration">--</span>
+              <button type="button" class="balance-btn" id="btnAcceptCalibration" onclick="acceptCalibration()" style="display: none; margin-left: 6px; padding: 2px 8px;">Přijmout</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1142,7 +1145,7 @@
           <div class="day-panel-title" id="dayPanelTitle">Záznam</div>
           <div class="day-panel-totals" id="dayPanelTotals"></div>
         </div>
-        <button type="button" onclick="closeDayPanel()">Zavřít</button>
+        <button type="button" id="dayPanelResetBtn" onclick="clearSelectedDay()" style="display: none;">Zpět na dnešek</button>
       </div>
       <div id="dayPanelItems"></div>
     </div>
@@ -1307,9 +1310,47 @@
             `odchylka ${data.deviation_kg > 0 ? '+' : ''}${data.deviation_kg.toFixed(2)} kg` +
             (percent !== null ? ` (${percent > 0 ? '+' : ''}${percent.toFixed(0)} %)` : '');
         }
+
+        const cal = data.calibration;
+        const calEl = document.getElementById('balanceCalibration');
+        const calBtn = document.getElementById('btnAcceptCalibration');
+        if (cal && calEl && calBtn) {
+          if (!cal.ready) {
+            calEl.textContent = `${cal.weigh_ins_count} / ${cal.required_weigh_ins} vážení`;
+            calBtn.style.display = 'none';
+          } else {
+            const delta = Math.round(cal.recommended_delta_kcal || 0);
+            const rec = Math.round(cal.recommended_maintenance_kcal || 0);
+            if (Math.abs(delta) >= 1) {
+              const sign = delta > 0 ? '+' : '';
+              calEl.textContent = `${rec} kcal/den (${sign}${delta} kcal)`;
+              calBtn.style.display = 'inline-block';
+            } else {
+              calEl.textContent = `${rec} kcal/den (kalibrováno)`;
+              calBtn.style.display = 'none';
+            }
+          }
+        }
       } catch (err) {
         console.error('Chyba při načítání bilance:', err);
         showError(`Nepodařilo se načíst bilanci proti maintenance: ${err}`);
+      }
+    }
+
+    async function acceptCalibration() {
+      const btn = document.getElementById('btnAcceptCalibration');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch('/api/balance/calibrate', { method: 'POST' });
+        if (!res.ok) {
+          throw new Error(await describeApiError(res));
+        }
+        await fetchData();
+      } catch (err) {
+        console.error('Chyba při kalibraci maintenance:', err);
+        showError(`Nepodařilo se nastavit nový maintenance: ${err}`);
+      } finally {
+        if (btn) btn.disabled = false;
       }
     }
 
@@ -1414,7 +1455,7 @@
 
       const percent = (consumed / target) * 100;
       bar.style.width = `${Math.min(percent, 100)}%`;
-      bar.className = 'kpi-bar-fill' + (percent > 105 ? ' over' : '');
+      bar.className = 'kpi-bar-fill' + (percent >= 90 ? ' over' : '');
 
       const remaining = target - consumed;
       const left = remaining >= 0
@@ -1689,11 +1730,7 @@
       // leave the "writing on <date>" hint and its way back on screen.
       selectedDay = day === todayIso() ? '' : day;
       await Promise.all([loadDay(), loadHeatmap(), loadWeek()]);
-      if (day) {
-        await showDayPanel(day);
-      } else {
-        closeDayPanel();
-      }
+      await showDayPanel(day || todayIso());
     }
 
     async function showDayPanel(day) {
@@ -1701,6 +1738,10 @@
       const panel = document.getElementById('dayPanel');
 
       document.getElementById('dayPanelTitle').textContent = `Záznam pro ${formatDate(day)}`;
+      const resetBtn = document.getElementById('dayPanelResetBtn');
+      if (resetBtn) {
+        resetBtn.style.display = (day && day !== todayIso()) ? 'inline-block' : 'none';
+      }
       document.getElementById('dayPanelTotals').innerHTML =
         `${Math.round(data.calories)} / ${Math.round(data.target_calories)} kcal | ` +
         `${data.protein_usable.toFixed(1)} / ${data.target_protein.toFixed(1)} g DIAAS | ` +

@@ -9,31 +9,41 @@ from nutrition_agent.balance import (
     FAT_KCAL_PER_KG,
     LEAN_KCAL_PER_KG,
     LEAN_SHARE_OF_GAIN,
+    MAX_LEAN_GAIN_KG_PER_30_DAYS,
+    apply_maintenance_calibration,
     build_balance_verdict,
+    build_maintenance_calibration,
     energy_per_kg_of_gain,
     estimate_mass_change,
 )
 from nutrition_agent.db import SCHEMA_SQL, get_connection
 from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog
 from nutrition_agent.reporting import format_balance_report
-from nutrition_agent.repository import save_food_logs, save_weight_log
+from nutrition_agent.repository import get_calorie_offset, save_food_logs, save_weight_log
 
 
 def test_energy_per_kg_of_gain_mixes_lean_and_fat():
     """A kilo of mixed tissue costs less than a kilo of fat."""
     expected = LEAN_SHARE_OF_GAIN * LEAN_KCAL_PER_KG + (1 - LEAN_SHARE_OF_GAIN) * FAT_KCAL_PER_KG
     assert energy_per_kg_of_gain() == round(expected, 1)
+    assert energy_per_kg_of_gain() == 5600.0
     assert energy_per_kg_of_gain() < FAT_KCAL_PER_KG
     assert energy_per_kg_of_gain() > LEAN_KCAL_PER_KG
 
 
 def test_estimate_mass_change_splits_a_surplus():
-    """A surplus becomes mixed tissue, a deficit mostly fat."""
-    estimate = estimate_mass_change(3570.0)
+    """A surplus up to the monthly muscle cap becomes 50:50 mixed tissue, a deficit mostly fat."""
+    estimate = estimate_mass_change(5600.0, days=30)
     assert estimate.kilograms == 1.0
-    assert estimate.lean_kilograms == 0.7
-    assert estimate.fat_kilograms == 0.3
+    assert estimate.lean_kilograms == 0.5
+    assert estimate.fat_kilograms == 0.5
     assert estimate.gain is True
+
+    # Above the 0.50 kg/30d muscle cap, excess surplus goes into fat at 7700 kcal/kg.
+    large_surplus = estimate_mass_change(11472.0, days=30)
+    assert large_surplus.lean_kilograms == MAX_LEAN_GAIN_KG_PER_30_DAYS
+    assert large_surplus.fat_kilograms == 1.26
+    assert large_surplus.kilograms == 1.76
 
     loss = estimate_mass_change(-FAT_KCAL_PER_KG)
     assert loss.kilograms == -1.0
@@ -107,10 +117,10 @@ def test_balance_verdict_compares_with_maintenance():
     assert verdict["balance_kcal"] == round(30000.0 - daily_maintenance * 10, 0)
     assert verdict["surplus"] is (verdict["balance_kcal"] >= 0)
 
-    expected_kg = round(verdict["balance_kcal"] / energy_per_kg_of_gain(), 2)
-    assert verdict["estimated_kg"] == expected_kg
+    expected_estimate = estimate_mass_change(verdict["balance_kcal"], days=10)
+    assert verdict["estimated_kg"] == expected_estimate.kilograms
     assert verdict["measured_kg"] == 1.0
-    assert verdict["deviation_kg"] == round(1.0 - expected_kg, 2)
+    assert verdict["deviation_kg"] == round(1.0 - expected_estimate.kilograms, 2)
     assert verdict["deviation_percent"] is not None
 
 
@@ -168,3 +178,37 @@ def test_balance_report_is_honest_about_the_model():
     assert "Skutečná změna:" in report
     assert "Odchylka:" in report
     assert "Je to odhad, ne měření" in report
+
+
+def test_maintenance_calibration_requires_seven_weigh_ins_and_shifts_targets():
+    """Calibration waits for 7 weigh-ins, computes the new baseline, and shifts all targets."""
+    from nutrition_agent.targets import DayType, DietGoal, calculate_daily_targets
+
+    conn_short = _seeded(days_logged=10, kcal=2900.0, weights=[82.0, 82.0, 82.0])
+    cal_short = build_maintenance_calibration(conn_short)
+    assert cal_short["ready"] is False
+    assert cal_short["weigh_ins_count"] == 3
+    assert cal_short["required_weigh_ins"] == 7
+
+    # 7 weigh-ins across 7 days with flat scale weight (83.0 kg) while eating 2975 kcal/day
+    # (+500 kcal/day above the 2475 kcal rest maintenance for 83 kg).
+    conn = _seeded(days_logged=7, kcal=2975.0, weights=[83.0] * 7)
+    cal = build_maintenance_calibration(conn)
+    assert cal["ready"] is True
+    assert cal["weigh_ins_count"] == 7
+    assert cal["delta_kg"] == 0.0
+    assert cal["current_maintenance_kcal"] == 2475.0
+    assert cal["recommended_delta_kcal"] == 500.0
+    assert cal["recommended_maintenance_kcal"] == 2975.0
+
+    applied = apply_maintenance_calibration(conn)
+    assert applied["applied"] is True
+    assert applied["applied_delta_kcal"] == 500.0
+    assert get_calorie_offset(conn) == 500.0
+    assert applied["calibration"]["recommended_delta_kcal"] == 0.0
+
+    # All derived targets (MAINTENANCE, LEAN_BULK, CUT) shift by the calibrated offset.
+    offset = get_calorie_offset(conn)
+    assert calculate_daily_targets(83.0, DietGoal.MAINTENANCE, DayType.REST, offset).calories == 2975.0
+    assert calculate_daily_targets(83.0, DietGoal.LEAN_BULK, DayType.REST, offset).calories == 3350.0
+    assert calculate_daily_targets(83.0, DietGoal.CUT, DayType.REST, offset).calories == 2650.0

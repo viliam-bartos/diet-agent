@@ -219,11 +219,20 @@ def test_dashboard_shows_the_maintenance_balance(api_client: TestClient):
     """
     body = api_client.get("/").text
 
-    for element in ("balanceKcal", "balanceIntake", "balanceEstimate", "balanceMeasured", "balanceDrawer"):
+    for element in (
+        "balanceKcal",
+        "balanceIntake",
+        "balanceEstimate",
+        "balanceMeasured",
+        "balanceCalibration",
+        "btnAcceptCalibration",
+        "balanceDrawer",
+    ):
         assert f'id="{element}"' in body, element
 
     assert "Bilance proti maintenance" in body
     assert "/api/balance?days=30" in body
+    assert "/api/balance/calibrate" in body
     assert "toggleBalance()" in body
     assert "week-corner-toggle" in body
 

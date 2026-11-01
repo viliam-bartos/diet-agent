@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from nutrition_agent import __version__
-from nutrition_agent.balance import build_balance_verdict
+from nutrition_agent.balance import apply_maintenance_calibration, build_balance_verdict
 from nutrition_agent.cli import handle_user_message
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
@@ -254,6 +254,18 @@ def create_app() -> FastAPI:
         conn = get_connection(settings.database_path)
         try:
             return build_balance_verdict(conn, days=days, ref_date=ref_date)
+        finally:
+            conn.close()
+
+    @app.post("/api/balance/calibrate")
+    async def api_calibrate_balance():
+        """Apply calibrated maintenance baseline from the last 7 weigh-ins."""
+        conn = get_connection(settings.database_path)
+        try:
+            try:
+                return apply_maintenance_calibration(conn)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
             conn.close()
 

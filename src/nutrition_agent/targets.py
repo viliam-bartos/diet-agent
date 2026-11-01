@@ -115,6 +115,7 @@ def calculate_daily_targets(
     weight_kg: float,
     goal: DietGoal = DietGoal.LEAN_BULK,
     day_type: DayType = DayType.TRAINING,
+    calorie_offset: float = 0.0,
 ) -> DailyTargets:
     """Calculate target calories and macros for given body weight, goal, and day type."""
     if weight_kg <= 0:
@@ -125,11 +126,11 @@ def calculate_daily_targets(
         GOAL_RATIOS[(DietGoal.LEAN_BULK, DayType.TRAINING)],
     )
 
-    calories = round(weight_kg * ratios.calories_per_kg, 1)
+    calories = round(max(0.0, weight_kg * ratios.calories_per_kg + calorie_offset), 1)
     protein_usable = round(weight_kg * ratios.protein_per_kg, 1)
     protein_total = round(protein_usable * 1.1, 1)
     fats = round(weight_kg * ratios.fats_per_kg, 1)
-    carbs = round(weight_kg * ratios.carbs_per_kg, 1)
+    carbs = round(max(0.0, weight_kg * ratios.carbs_per_kg + calorie_offset / 4.0), 1)
 
     return DailyTargets(
         weight_kg=round(weight_kg, 1),

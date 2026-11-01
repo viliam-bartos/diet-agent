@@ -564,6 +564,20 @@ def get_day_type(conn: sqlite3.Connection, day: str) -> DayType:
     return DayType.REST
 
 
+def get_calorie_offset(conn: sqlite3.Connection) -> float:
+    """Return the calibrated daily calorie offset stored in user_settings."""
+    raw = get_user_setting(conn, "maintenance_offset_kcal", "0.0") or "0.0"
+    try:
+        return float(raw)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def set_calorie_offset(conn: sqlite3.Connection, offset_kcal: float) -> None:
+    """Persist the calibrated daily calorie offset."""
+    set_user_setting(conn, "maintenance_offset_kcal", str(round(offset_kcal, 1)))
+
+
 def get_user_profile(conn: sqlite3.Connection) -> tuple[DietGoal, DayType, float]:
     """Return active (DietGoal, DayType of today, current_weight_kg)."""
     raw_goal = get_user_setting(conn, "goal", DietGoal.LEAN_BULK.value) or DietGoal.LEAN_BULK.value
@@ -970,6 +984,7 @@ def get_day_summaries(
     from datetime import datetime, timedelta
 
     goal, profile_day_type, weight = get_user_profile(conn)
+    calorie_offset = get_calorie_offset(conn)
 
     food_logs = get_food_logs_between_days(conn, start_day, end_day)
     workout_logs = get_workout_logs_between_days(conn, start_day, end_day)
@@ -1023,7 +1038,9 @@ def get_day_summaries(
         else:
             day_type = DayType.REST
 
-        targets = calculate_daily_targets(weight, goal, day_type)
+        targets = calculate_daily_targets(
+            weight, goal, day_type, calorie_offset=calorie_offset
+        )
         calories = daily_calories.get(day, 0.0)
 
         summaries.append(

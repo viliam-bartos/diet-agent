@@ -43,6 +43,7 @@ from nutrition_agent.repository import (
     delete_day_logs,
     delete_food,
     ensure_food_catalog,
+    get_calorie_offset,
     get_daily_food_logs,
     get_food,
     get_recent_food_logs,
@@ -405,7 +406,9 @@ def handle_user_message(
             return str(exc)
         set_user_setting(conn, "goal", goal.value)
         _, day_type, weight = get_user_profile(conn)
-        targets = calculate_daily_targets(weight, goal, day_type)
+        targets = calculate_daily_targets(
+            weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+        )
         return (
             f"Aktivní cíl byl změněn na: {goal.value.upper()}.\n"
             f"Přepočtené denní cíle ({weight:.1f} kg, {day_type.value}):\n"
@@ -423,7 +426,9 @@ def handle_user_message(
         day = target_day or local_date(utc_now_iso())
         set_day_type(conn, day, day_type)
         goal, _, weight = get_user_profile(conn)
-        targets = calculate_daily_targets(weight, goal, day_type)
+        targets = calculate_daily_targets(
+            weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+        )
         day_info = f" na den {day}" if day != local_date(utc_now_iso()) else ""
         return (
             f"Typ dne{day_info} byl nastaven na: {day_type.value.upper()}.\n"
@@ -534,7 +539,9 @@ def handle_user_message(
         save_weight_log(conn, weight_log)
 
         goal, day_type, _ = get_user_profile(conn)
-        new_targets = calculate_daily_targets(valid_weight, goal, day_type)
+        new_targets = calculate_daily_targets(
+            valid_weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+        )
         day_info = f" na den {target_day}" if target_day else ""
         return (
             f"Zaznamenána tělesná hmotnost{day_info}: {valid_weight:.1f} kg\n"
@@ -641,7 +648,9 @@ def handle_user_message(
         day_fats = sum(x.fats for x in daily_foods)
 
         goal, day_type, current_weight = get_user_profile(conn)
-        targets = calculate_daily_targets(current_weight, goal, day_type)
+        targets = calculate_daily_targets(
+            current_weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+        )
 
         lines.append("---")
         if target_day:
@@ -664,7 +673,9 @@ def handle_user_message(
 def run_interactive_loop(foods: list[FoodDefinition], conn: sqlite3.Connection) -> None:
     """Run interactive CLI chat loop."""
     goal, day_type, weight = get_user_profile(conn)
-    targets = calculate_daily_targets(weight, goal, day_type)
+    targets = calculate_daily_targets(
+        weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+    )
 
     print("Nutrition Agent spuštěn.")
     print(

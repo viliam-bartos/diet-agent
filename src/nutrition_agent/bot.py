@@ -24,6 +24,7 @@ from nutrition_agent.repository import (
     count_day_logs,
     delete_day_logs,
     ensure_food_catalog,
+    get_calorie_offset,
     get_daily_food_logs,
     get_daily_weight_comparison,
     get_daily_workout_log,
@@ -207,7 +208,9 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
                 workout_val = "Plánován trénink (zatím nezapsán)"
 
             # 3. Targets & Consumption
-            targets = calculate_daily_targets(current_weight, goal, day_type)
+            targets = calculate_daily_targets(
+                current_weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+            )
             food_logs = get_daily_food_logs(conn, today_str)
 
             total_cal = sum(x.calories for x in food_logs)
@@ -282,7 +285,9 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
             )
             save_weight_log(conn, log)
             goal, day_type, _ = get_user_profile(conn)
-            targets = calculate_daily_targets(valid_w, goal, day_type)
+            targets = calculate_daily_targets(
+                valid_w, goal, day_type, calorie_offset=get_calorie_offset(conn)
+            )
 
             embed = discord.Embed(
                 title="Hmotnost zaznamenána",

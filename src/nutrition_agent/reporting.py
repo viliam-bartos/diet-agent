@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from nutrition_agent.balance import build_balance_verdict
 from nutrition_agent.repository import (
+    get_calorie_offset,
     get_food_logs_in_range,
     get_user_profile,
     get_weight_logs_in_range,
@@ -169,7 +170,9 @@ def generate_period_report(
     weight_logs = get_weight_logs_in_range(conn, start_query, end_query)
 
     goal, day_type, current_weight = get_user_profile(conn)
-    targets = calculate_daily_targets(current_weight, goal, day_type)
+    targets = calculate_daily_targets(
+        current_weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+    )
 
     lines: list[str] = [f"=== {title} ===", ""]
 
@@ -325,7 +328,7 @@ def format_balance_report(verdict: dict[str, object]) -> str:
         lines.append(
             f"Odhad hmoty:       {estimate:+.2f} kg "
             f"({verdict['kcal_per_kg']:.0f} kcal/kg, "
-            f"{'70 % svaly / 30 % tuk' if surplus else 'převážně tuk'})"
+            f"{'50 % svaly / 50 % tuk do stropu 0.5 kg/30 dní' if surplus else 'převážně tuk'})"
         )
         if surplus and estimate > 0:
             lines.append(
@@ -351,8 +354,8 @@ def format_balance_report(verdict: dict[str, object]) -> str:
 
     lines.append("")
     lines.append(
-        "Model: tuk 7700 kcal/kg, svaly 1800 kcal/kg, u přebytku 70 % hmoty do svalů. "
-        "Je to odhad, ne měření."
+        "Model: tuk 7700 kcal/kg, svaly 3500 kcal/kg, u přebytku 50:50 svaly:tuk "
+        "(strop 0.5 kg svalů / 30 dní). Je to odhad, ne měření."
     )
     return "\n".join(lines)
 
