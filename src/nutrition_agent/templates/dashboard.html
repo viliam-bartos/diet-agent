@@ -344,7 +344,6 @@
     /* Level classes are standalone so both heatmap cells and legend swatches pick them up. */
     .level-empty { background: #E6DFC5; }
     .level-green { background: #38A169; border-color: #2F855A; }
-    .level-blue { background: #3182CE; border-color: #2B6CB0; }
     .level-amber { background: #DD6B20; border-color: #C05621; }
 
     .heatmap-cell.has-workout::after {
@@ -981,13 +980,10 @@
       </div>
       <div class="heatmap-legend">
         <div class="legend-item">
-          <div class="legend-box level-green"></div> Splněné kalorie i bílkoviny
+          <div class="legend-box level-green"></div> Splněno: kalorie i bílkoviny ≥90 % cíle
         </div>
         <div class="legend-item">
-          <div class="legend-box level-blue"></div> Splněné bílkoviny
-        </div>
-        <div class="legend-item">
-          <div class="legend-box level-amber"></div> Záznam pod cílem
+          <div class="legend-box level-amber"></div> Záznam, ale pod 90 % u kalorií nebo bílkovin
         </div>
         <div class="legend-item">
           <div class="legend-box level-empty"></div> Bez záznamu
@@ -1152,13 +1148,14 @@
     // Must match API_LEVEL in web.py; tests/test_web_api.py keeps the two in step.
     // A process started before an API change serves this page from disk but answers
     // with the old code, and this number is what gives it away.
-    const PAGE_API_LEVEL = 5;
+    const PAGE_API_LEVEL = 6;
 
     const REQUIRED_DAY_FIELDS = [
       'calories', 'target_calories',
       'protein_usable', 'target_protein', 'protein_total', 'target_protein_total',
       'carbs', 'target_carbs',
       'fats', 'target_fats',
+      'adherence',
       'version', 'api_level',
     ];
 
@@ -1455,10 +1452,20 @@
             (c.has_workout ? ' has-workout' : '') +
             (c.date === selectedDay ? ' selected' : '') +
             (c.date === today ? ' today' : '');
+          const kcalPct = c.target_calories
+            ? Math.round((c.calories / c.target_calories) * 100) : 0;
+          const proteinPct = c.target_protein
+            ? Math.round((c.protein_usable / c.target_protein) * 100) : 0;
+          const verdict = c.level === 'green'
+            ? 'splněno (≥90 % u obou)'
+            : c.level === 'empty'
+              ? 'bez záznamu'
+              : 'pod cílem (alespoň jedno <90 %)';
           cellEl.title =
             `${formatDate(c.date)} (${c.day_type === 'training' ? 'trénink' : 'odpočinek'})\n` +
-            `Energie: ${c.calories} / ${c.target_calories} kcal\n` +
-            `Bílkoviny: ${c.protein_usable} / ${c.target_protein} g DIAAS\n` +
+            `${verdict}\n` +
+            `Energie: ${c.calories} / ${c.target_calories} kcal (${kcalPct} %)\n` +
+            `Bílkoviny: ${c.protein_usable} / ${c.target_protein} g DIAAS (${proteinPct} %)\n` +
             `Sacharidy: ${c.carbs} g | Tuky: ${c.fats} g` +
             (c.has_workout ? `\nTrénink: ${c.workout_type}` : '');
           cellEl.onclick = () => selectDay(c.date === selectedDay ? '' : c.date);
@@ -1485,9 +1492,22 @@
     async function showDayPanel(day) {
       const data = await (await fetch(`/api/day?date=${day}`)).json();
       const panel = document.getElementById('dayPanel');
+      const verdict = data.adherence || {};
+
+      const verdictText = verdict.level === 'green'
+        ? 'splněno'
+        : verdict.level === 'empty'
+          ? 'bez záznamu'
+          : 'pod cílem';
+      const ratioText = verdict.threshold
+        ? ` (kalorie ${Math.round((verdict.calorie_ratio || 0) * 100)} %, ` +
+          `bílkoviny ${Math.round((verdict.protein_ratio || 0) * 100)} %, ` +
+          `hranice ${Math.round(verdict.threshold * 100)} %)`
+        : '';
 
       document.getElementById('dayPanelTitle').textContent = formatDate(day);
       document.getElementById('dayPanelTotals').innerHTML =
+        `Den: ${verdictText}${ratioText}<br>` +
         `${Math.round(data.calories)} / ${Math.round(data.target_calories)} kcal | ` +
         `${data.protein_usable.toFixed(1)} / ${data.target_protein.toFixed(1)} g DIAAS | ` +
         `${data.carbs.toFixed(1)} g sacharidů | ${data.fats.toFixed(1)} g tuků` +

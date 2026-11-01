@@ -56,7 +56,7 @@ TEMPLATES_DIR = Path(__file__).parent / "templates"
 # literal in its template and compares it with the value the server reports. A process
 # started before the change serves the new template from disk while still running the
 # old code, and the version string alone does not give that away.
-API_LEVEL: int = 5
+API_LEVEL: int = 6
 
 RecordType = Literal["food", "weight", "workout"]
 

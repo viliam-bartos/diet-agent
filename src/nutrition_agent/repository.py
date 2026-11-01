@@ -953,6 +953,7 @@ def get_day_summaries(
     daily_protein_total: dict[str, float] = defaultdict(float)
     daily_carbs: dict[str, float] = defaultdict(float)
     daily_fats: dict[str, float] = defaultdict(float)
+    daily_items: dict[str, int] = defaultdict(int)
 
     for food in food_logs:
         day = local_date(food.logged_at)
@@ -961,6 +962,7 @@ def get_day_summaries(
         daily_protein_total[day] += food.protein_raw
         daily_carbs[day] += food.carbs
         daily_fats[day] += food.fats
+        daily_items[day] += 1
 
     daily_workout: dict[str, CalculatedWorkoutLog] = {}
     for workout in workout_logs:
@@ -1012,7 +1014,10 @@ def get_day_summaries(
                 "day_type": day_type.value,
                 "has_workout": workout is not None,
                 "workout_type": workout.workout_type if workout else None,
-                "has_food": calories > 0.0,
+                # Any logged meal counts, even one whose macros round to zero: a day with a
+                # record must not look untracked.
+                "has_food": day in daily_calories,
+                "logged_items": daily_items.get(day, 0),
             }
         )
         current += timedelta(days=1)
@@ -1020,20 +1025,47 @@ def get_day_summaries(
     return summaries
 
 
+# A day counts as met from 90 % of its target up; there is no upper bound, so eating more
+# than planned is not a failure. One number for the calendar, the day panel and the tooltip.
+ADHERENCE_MIN_RATIO: float = 0.90
+
+
+def adherence_ratios(summary: dict[str, object]) -> tuple[float, float]:
+    """Return how much of that day's calorie and protein target was eaten."""
+    target_calories = summary["target_calories"] or 0.0
+    target_protein = summary["target_protein"] or 0.0
+
+    calorie_ratio = summary["calories"] / target_calories if target_calories > 0 else 0.0
+    protein_ratio = summary["protein_usable"] / target_protein if target_protein > 0 else 0.0
+    return round(calorie_ratio, 3), round(protein_ratio, 3)
+
+
 def classify_adherence(summary: dict[str, object]) -> str:
-    """Grade one day: protein target met, both targets met, or under target."""
+    """Grade one day: both targets met from 90 %, otherwise under target, or no record.
+
+    A day with nothing logged is 'empty' rather than 'under target', so an untracked day
+    does not look like a failed one.
+    """
     if not summary["has_food"]:
         return "empty"
 
-    protein_ok = summary["protein_usable"] >= (summary["target_protein"] * 0.90)
-    calories = summary["calories"]
-    calories_ok = summary["target_calories"] * 0.85 <= calories <= summary["target_calories"] * 1.15
-
-    if protein_ok and calories_ok:
+    calorie_ratio, protein_ratio = adherence_ratios(summary)
+    if calorie_ratio >= ADHERENCE_MIN_RATIO and protein_ratio >= ADHERENCE_MIN_RATIO:
         return "green"
-    if protein_ok:
-        return "blue"
     return "amber"
+
+
+def describe_adherence(summary: dict[str, object]) -> dict[str, object]:
+    """Return the verdict for one day together with the numbers behind it."""
+    calorie_ratio, protein_ratio = adherence_ratios(summary)
+    return {
+        "level": classify_adherence(summary),
+        "threshold": ADHERENCE_MIN_RATIO,
+        "calorie_ratio": calorie_ratio,
+        "protein_ratio": protein_ratio,
+        "calories_met": calorie_ratio >= ADHERENCE_MIN_RATIO,
+        "protein_met": protein_ratio >= ADHERENCE_MIN_RATIO,
+    }
 
 
 def get_heatmap_data(
@@ -1139,6 +1171,8 @@ def get_day_detail(
 
     return {
         **summary,
+        # The verdict behind the calendar colour, so the day panel can explain it.
+        "adherence": describe_adherence(summary),
         "remaining_calories": round(summary["target_calories"] - summary["calories"], 0),
         "remaining_protein": round(summary["target_protein"] - summary["protein_usable"], 1),
         "remaining_carbs": round(summary["target_carbs"] - summary["carbs"], 1),
@@ -1153,6 +1187,7 @@ def get_day_detail(
                 "state": food.state,
                 "calories": food.calories,
                 "protein_usable": food.protein_usable,
+                "protein_total": food.protein_raw,
                 "carbs": food.carbs,
                 "fats": food.fats,
                 "nutrition_source": food.nutrition_source,

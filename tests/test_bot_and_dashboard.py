@@ -285,9 +285,29 @@ def test_heatmap_levels_and_workout_markers(seeded_db: sqlite3.Connection):
     """Verify heatmap adherence levels, workout markers and day coverage.
 
     Each day is graded against its own target: the seeded rest days use the rest
-    target and the training days use the training target, so the same intake can
-    land in different levels.
+    target and the training days use the training target. A day counts as met from
+    90 % of both targets.
     """
+    # Top one rest day up so the calendar carries both verdicts.
+    save_food_logs(
+        seeded_db,
+        [
+            CalculatedFoodLog(
+                logged_at="2026-09-09T18:00:00Z",
+                raw_input="druhá večeře",
+                food_name_matched="Kuřecí prsa",
+                amount_g=100.0,
+                state="raw",
+                is_estimated=False,
+                calories=700.0,
+                protein_raw=0.0,
+                protein_usable=0.0,
+                carbs=0.0,
+                fats=0.0,
+            )
+        ],
+    )
+
     cells = get_heatmap_data(seeded_db, "2026-09-08T00:00:00", "2026-09-17T23:59:59")
 
     assert len(cells) == 10
@@ -313,13 +333,13 @@ def test_heatmap_levels_and_workout_markers(seeded_db: sqlite3.Connection):
     assert cells[1]["target_calories"] == rest.calories
     assert rest.calories < training.calories
 
-    # 2000 kcal and 140 g DIAAS is under both targets. Protein only clears the rest
-    # target, so training days grade amber while rest days grade blue.
-    for cell in cells:
-        if cell["has_workout"]:
-            assert cell["level"] == "amber", cell["date"]
-        else:
-            assert cell["level"] == "blue", cell["date"]
+    # 2000 kcal and 140 g DIAAS misses the training target by a wide margin -> amber.
+    assert cells[0]["level"] == "amber"
+    # The topped-up rest day clears 90 % of both rest targets -> green.
+    assert cells[1]["level"] == "green"
+    assert cells[1]["calories"] == 2700.0
+    # No day is graded as "protein only" any more: that state no longer exists.
+    assert {c["level"] for c in cells} <= {"green", "amber", "empty"}
 
 
 def test_a_workout_yesterday_does_not_make_today_a_training_day():
@@ -378,7 +398,7 @@ def test_heatmap_uses_per_day_targets(seeded_db: sqlite3.Connection):
 
 
 def test_heatmap_level_classification():
-    """Verify blue (protein only), amber (under target) and empty (no data) levels."""
+    """Verify the 90 % rule: both targets met, under target, or no record at all."""
     conn = get_connection(":memory:")
     conn.executescript(SCHEMA_SQL)
 
@@ -402,17 +422,53 @@ def test_heatmap_level_classification():
             ],
         )
 
-    # Protein target hit, calories far below -> blue
+    # Protein target hit, calories far below -> amber (protein alone is no longer a level)
     add_day("2026-09-01", 1000.0, 150.0)
+    # Both targets cleared from 90 % (rest target is 2881 kcal / 146.6 g at 83.9 kg)
+    add_day("2026-09-02", 2600.0, 140.0)
     # Both below target -> amber
-    add_day("2026-09-02", 1000.0, 50.0)
+    add_day("2026-09-03", 1000.0, 50.0)
     # No record -> empty
-    cells = get_heatmap_data(conn, "2026-09-01T00:00:00", "2026-09-03T23:59:59")
+    cells = get_heatmap_data(conn, "2026-09-01T00:00:00", "2026-09-04T23:59:59")
 
     levels = {c["date"]: c["level"] for c in cells}
-    assert levels["2026-09-01"] == "blue"
-    assert levels["2026-09-02"] == "amber"
-    assert levels["2026-09-03"] == "empty"
+    assert levels["2026-09-01"] == "amber"
+    assert levels["2026-09-02"] == "green"
+    assert levels["2026-09-03"] == "amber"
+    assert levels["2026-09-04"] == "empty"
+
+
+def test_adherence_verdict_explains_the_colour():
+    """The day detail carries the ratios and the threshold behind its colour."""
+    from nutrition_agent.repository import get_day_detail
+
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+    save_food_logs(
+        conn,
+        [
+            CalculatedFoodLog(
+                logged_at="2026-09-02T12:00:00Z",
+                raw_input="test",
+                food_name_matched="Test",
+                amount_g=100.0,
+                state="raw",
+                is_estimated=False,
+                calories=2600.0,
+                protein_raw=140.0,
+                protein_usable=140.0,
+                carbs=0.0,
+                fats=0.0,
+            )
+        ],
+    )
+
+    verdict = get_day_detail(conn, "2026-09-02")["adherence"]
+    assert verdict["level"] == "green"
+    assert verdict["threshold"] == 0.90
+    assert verdict["calories_met"] is True
+    assert verdict["protein_met"] is True
+    assert verdict["calorie_ratio"] >= 0.90
 
 
 def test_heatmap_without_explicit_range_spans_a_full_year(seeded_db: sqlite3.Connection):

@@ -200,16 +200,20 @@ def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):
     """
     body = api_client.get("/").text
 
-    for level in ("green", "blue", "amber", "empty"):
+    for level in ("green", "amber", "empty"):
         assert f"legend-box level-{level}" in body
         # The colour rule must be standalone, not scoped to heatmap cells only
         assert f".heatmap-cell.level-{level} " not in body
         assert f".level-{level} {{" in body or f".level-{level} {{ " in body
 
     assert ".level-green { background: #38A169" in body
-    assert ".level-blue { background: #3182CE" in body
     assert ".level-amber { background: #DD6B20" in body
     assert ".level-empty { background: #E6DFC5" in body
+
+    # The "protein only" level is gone: a day is either met or not.
+    assert "level-blue" not in body
+    # The rule itself is written next to the colours.
+    assert "kalorie i bílkoviny ≥90 % cíle" in body
 
 
 def test_dashboard_weight_chart_avoids_a_scatter_dataset(api_client: TestClient):
