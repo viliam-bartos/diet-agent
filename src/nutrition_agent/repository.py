@@ -902,6 +902,32 @@ def get_food_logs_between_days(
     return [_row_to_food_log(row) for row in cursor.fetchall()]
 
 
+def get_weight_logs_between_days(
+    conn: sqlite3.Connection,
+    start_day: str,
+    end_day: str,
+) -> list[CalculatedWeightLog]:
+    """Fetch weight logs whose local calendar date falls in the inclusive range."""
+    cursor = conn.execute(
+        """
+        SELECT id, logged_at, raw_input, weight_kg
+        FROM weight_logs
+        WHERE date(logged_at, 'localtime') BETWEEN ? AND ?
+        ORDER BY logged_at ASC
+        """,
+        (start_day, end_day),
+    )
+    return [
+        CalculatedWeightLog(
+            id=row["id"],
+            logged_at=row["logged_at"],
+            raw_input=row["raw_input"],
+            weight_kg=row["weight_kg"],
+        )
+        for row in cursor.fetchall()
+    ]
+
+
 def get_workout_logs_between_days(
     conn: sqlite3.Connection,
     start_day: str,
@@ -943,7 +969,7 @@ def get_day_summaries(
     from collections import defaultdict
     from datetime import datetime, timedelta
 
-    goal, _, weight = get_user_profile(conn)
+    goal, profile_day_type, weight = get_user_profile(conn)
 
     food_logs = get_food_logs_between_days(conn, start_day, end_day)
     workout_logs = get_workout_logs_between_days(conn, start_day, end_day)
@@ -978,19 +1004,22 @@ def get_day_summaries(
 
     summaries: list[dict[str, object]] = []
 
+    today_str = local_date(utc_now_iso())
     current = datetime.strptime(start_day, "%Y-%m-%d")
     last = datetime.strptime(end_day, "%Y-%m-%d")
     while current <= last:
         day = current.strftime("%Y-%m-%d")
         workout = daily_workout.get(day)
 
-        # A day is a training day only when the user said so or a workout was logged in
-        # it; otherwise it is a rest day, and today is no exception.
+        # An explicit type wins; a logged workout makes it a training day.
+        # For today, align with the active profile day_type; past untracked days default to REST.
         chosen_type = explicit_types.get(day)
         if chosen_type is not None:
             day_type = chosen_type
         elif workout:
             day_type = DayType.TRAINING
+        elif day == today_str:
+            day_type = profile_day_type
         else:
             day_type = DayType.REST
 
@@ -1181,8 +1210,11 @@ def get_day_detail(
         "items": [
             {
                 "id": food.id,
+                "type": "food",
                 "logged_at": food.logged_at,
                 "name": food.food_name_matched,
+                "title": food.food_name_matched,
+                "raw_input": food.raw_input,
                 "amount_g": food.amount_g,
                 "state": food.state,
                 "calories": food.calories,
@@ -1190,6 +1222,18 @@ def get_day_detail(
                 "protein_total": food.protein_raw,
                 "carbs": food.carbs,
                 "fats": food.fats,
+                "calories_per_100g": per_100g_from_portion(
+                    food.calories, food.amount_g, food.state, food.food_name_matched
+                ),
+                "protein_usable_per_100g": per_100g_from_portion(
+                    food.protein_usable, food.amount_g, food.state, food.food_name_matched
+                ),
+                "carbs_per_100g": per_100g_from_portion(
+                    food.carbs, food.amount_g, food.state, food.food_name_matched
+                ),
+                "fats_per_100g": per_100g_from_portion(
+                    food.fats, food.amount_g, food.state, food.food_name_matched
+                ),
                 "nutrition_source": food.nutrition_source,
             }
             for food in food_logs

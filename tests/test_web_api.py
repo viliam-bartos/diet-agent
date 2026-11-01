@@ -192,6 +192,42 @@ def test_day_payload_carries_version_and_every_card_field(api_client: TestClient
     assert data["version"] == __version__
 
 
+def test_api_balance_endpoint_reports_the_finished_window(api_client: TestClient):
+    """The balance compares the finished window against maintenance and the scale."""
+    from nutrition_agent.balance import LOSS_KCAL_PER_KG, energy_per_kg_of_gain
+
+    data = api_client.get("/api/balance", params={"days": 30}).json()
+
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    assert data["end_date"] == yesterday
+    assert data["window_days"] == 30
+    # Today is outside the window, so four of the five seeded days count.
+    assert data["logged_days"] == 4
+    assert data["balance_kcal"] == data["intake_kcal"] - data["maintenance_kcal"]
+
+    # A surplus becomes mixed tissue, a deficit is treated as mostly fat.
+    divisor = energy_per_kg_of_gain() if data["surplus"] else LOSS_KCAL_PER_KG
+    assert abs(data["estimated_kg"] - data["balance_kcal"] / divisor) < 0.01
+    assert data["measured_kg"] is not None
+    assert data["deviation_kg"] == round(data["measured_kg"] - data["estimated_kg"], 2)
+
+
+def test_dashboard_shows_the_maintenance_balance(api_client: TestClient):
+    """The balance card carries the numbers the endpoint produces.
+
+    This is a proxy check: it reads the template rather than running a browser.
+    """
+    body = api_client.get("/").text
+
+    for element in ("balanceKcal", "balanceIntake", "balanceEstimate", "balanceMeasured"):
+        assert f'id="{element}"' in body, element
+
+    assert "Bilance proti maintenance" in body
+    assert "/api/balance?days=30" in body
+    # The model behind the estimate is stated on the card, not hidden.
+    assert "7700 kcal/kg" in body and "1800 kcal/kg" in body
+
+
 def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):
     """Legend swatches must actually get the level colours.
 

@@ -27,11 +27,17 @@ from nutrition_agent.nutrition import (
     build_food_from_estimate,
     calculate_food_log,
     convert_to_grams,
+    fat_variant_classes,
     find_matching_food,
     names_contradict,
+    quantity_tokens,
     validate_body_weight,
 )
-from nutrition_agent.reporting import format_daily_target_breakdown, generate_period_report
+from nutrition_agent.reporting import (
+    format_daily_target_breakdown,
+    generate_balance_report,
+    generate_period_report,
+)
 from nutrition_agent.repository import (
     DAY_LOG_LABELS,
     delete_day_logs,
@@ -112,14 +118,18 @@ def resolve_food(
             existing, _ = find_matching_food(estimate.name, foods)
         except FoodNotFoundError:
             existing = None
-        if existing is not None:
+        if existing is not None and not names_contradict(food_name, existing.name):
             logger.info(
                 "Odhad '%s' odpovídá katalogové potravině '%s'.", estimate.name, existing.name
             )
             return existing, False
 
     learned = build_food_from_estimate(estimate)
-    if names_contradict(food_name, learned.name):
+    if (
+        names_contradict(food_name, learned.name)
+        or quantity_tokens(food_name)
+        or fat_variant_classes(food_name)
+    ):
         # Keep the wording that carries the variant, otherwise the learned food would
         # answer to the wrong product next time.
         learned = learned.model_copy(update={"name": " ".join(food_name.lower().split())})
@@ -484,6 +494,18 @@ def handle_user_message(
         return generate_period_report(conn, "kompletni")
     if command_lower in ("historie", "history"):
         return format_history(conn)
+    if first_token in ("bilance", "balance", "plusminus"):
+        # 'bilance' works on a finished window, 30 days back by default.
+        tokens = clean_input.split()
+        days = 30
+        if len(tokens) > 1:
+            try:
+                days = int(tokens[1])
+            except ValueError:
+                return "Použití: bilance [<počet dní>], například 'bilance 30'."
+            if days < 1:
+                return "Počet dní musí být kladné číslo."
+        return generate_balance_report(conn, days=days)
 
     # 3. LLM Parsing
     try:

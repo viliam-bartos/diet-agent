@@ -8,6 +8,7 @@ from datetime import datetime
 import discord
 from discord import app_commands
 
+from nutrition_agent.balance import build_balance_verdict
 from nutrition_agent.cli import format_day_counts, handle_user_message
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
@@ -240,9 +241,17 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
             else:
                 meals_text = "Dnes zatím nebyla zaznamenána žádná jídla."
 
+            day_met = (
+                targets.calories > 0
+                and total_cal >= targets.calories * 0.90
+                and targets.protein_usable > 0
+                and total_prot >= targets.protein_usable * 0.90
+            )
+            embed_color = discord.Color.green() if day_met else discord.Color.gold()
+
             embed = discord.Embed(
-                title=f"Denní přehled ({today_str})",
-                color=discord.Color.blue(),
+                title=f"Denní přehled ({today_str})" + (" [CÍL SPLNĚN]" if day_met else ""),
+                color=embed_color,
                 timestamp=datetime.now(),
             )
             embed.add_field(name="Hmotnost", value=weight_val, inline=True)
@@ -390,6 +399,59 @@ def create_bot() -> tuple[discord.Client, app_commands.CommandTree]:
             description=f"Otevřete webový dashboard na adrese:\n<{web_url}>",
             color=discord.Color.gold(),
         )
+        await interaction.response.send_message(embed=embed, view=build_dashboard_view())
+
+    @tree.command(name="bilance", description="Bilance proti maintenance a odhad hmoty")
+    @app_commands.describe(dny="Kolik uzavřených dní vzít (výchozí 30)")
+    async def cmd_balance(interaction: discord.Interaction, dny: int = 30):
+        conn = get_connection(settings.database_path)
+        try:
+            verdict = build_balance_verdict(conn, days=dny)
+        finally:
+            conn.close()
+
+        estimate = verdict["estimated_kg"]
+        embed = discord.Embed(
+            title=f"Bilance proti maintenance ({verdict['start_date']} až {verdict['end_date']})",
+            color=discord.Color.green() if verdict["surplus"] else discord.Color.red(),
+            timestamp=datetime.now(),
+        )
+        embed.add_field(
+            name="Energie",
+            value=(
+                f"Příjem: {verdict['intake_kcal']:.0f} kcal\n"
+                f"Maintenance: {verdict['maintenance_kcal']:.0f} kcal\n"
+                f"Bilance: **{verdict['balance_kcal']:+.0f} kcal**"
+            ),
+            inline=True,
+        )
+        embed.add_field(
+            name="Odhad hmoty",
+            value=(
+                f"{estimate:+.2f} kg\n"
+                + (
+                    f"svaly {verdict['estimated_lean_kg']:+.2f} kg\n"
+                    f"tuk {verdict['estimated_fat_kg']:+.2f} kg"
+                    if verdict["surplus"]
+                    else "převážně tuk"
+                )
+                + f"\n{verdict['kcal_per_kg']:.0f} kcal/kg"
+            ),
+            inline=True,
+        )
+        measured = verdict["measured_kg"]
+        if measured is None:
+            measured_text = "nelze změřit: v okně nejsou dvě vážení"
+        else:
+            measured_text = (
+                f"{measured:+.2f} kg ({verdict['first_weight_kg']:.1f} → "
+                f"{verdict['last_weight_kg']:.1f} kg)\n"
+                f"odchylka {verdict['deviation_kg']:+.2f} kg"
+            )
+        embed.add_field(name="Proti váze", value=measured_text, inline=False)
+
+        if verdict["warnings"]:
+            embed.set_footer(text=" ".join(verdict["warnings"])[:200])
         await interaction.response.send_message(embed=embed, view=build_dashboard_view())
 
     @tree.command(name="help", description="Vypíše všechny příkazy a co dělají")

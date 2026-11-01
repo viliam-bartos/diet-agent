@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from nutrition_agent import __version__
+from nutrition_agent.balance import build_balance_verdict
 from nutrition_agent.cli import handle_user_message
 from nutrition_agent.config import settings
 from nutrition_agent.db import get_connection, init_db
@@ -236,6 +237,23 @@ def create_app() -> FastAPI:
         conn = get_connection(settings.database_path)
         try:
             return get_week_summary(conn, end_day, days=7)
+        finally:
+            conn.close()
+
+    @app.get("/api/balance")
+    async def api_balance(
+        days: int = Query(30, ge=1, le=365),
+        end_date: str = Query("", description="Poslední den okna (YYYY-MM-DD), prázdné = automaticky"),
+    ):
+        """Energy balance against maintenance and the mass it explains."""
+        ref_date = None
+        if end_date.strip():
+            from datetime import datetime, timedelta
+            day = _parse_day_or_422(end_date)
+            ref_date = datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)
+        conn = get_connection(settings.database_path)
+        try:
+            return build_balance_verdict(conn, days=days, ref_date=ref_date)
         finally:
             conn.close()
 

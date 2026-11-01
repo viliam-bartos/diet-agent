@@ -206,7 +206,17 @@ def quantity_tokens(name: str) -> set[str]:
 # Fat-content variants: three classes of product, not three spellings of one.
 # Folded, because names are compared without diacritics.
 FAT_VARIANT_CLASSES: dict[str, frozenset[str]] = {
-    "low": frozenset({"odtucnene", "odtucneny", "odtucnena", "nizkotucne", "nizkotucny"}),
+    "low": frozenset(
+        {
+            "odtucnene",
+            "odtucneny",
+            "odtucnena",
+            "nizkotucne",
+            "nizkotucny",
+            "nizkotucna",
+            "light",
+        }
+    ),
     "semi": frozenset({"polotucne", "polotucny", "polotucna"}),
     "full": frozenset({"plnotucne", "plnotucny", "plnotucna"}),
 }
@@ -226,22 +236,26 @@ def fat_variant_classes(name: str) -> set[str]:
 
 
 def names_contradict(query: str, candidate: str) -> bool:
-    """Report whether the two names promise different variants of the same food.
+    """Report whether candidate contradicts the product variant promised by query.
 
-    A number ('gouda 45%') or a fat variant ('mléko polotučné') in the query is a claim
-    about the product. A candidate that states another number or another fat class is a
-    different product, no matter how similar the two names look.
+    A number ('gouda 48%', 'eidam 30%') or a fat variant ('mléko polotučné', 'tvaroh odtučněný')
+    in the query identifies a specific product variant. A candidate that states a different
+    number or fat class, or lacks the stated variant altogether, is a different product
+    and must not be accepted.
     """
     query_numbers = quantity_tokens(query)
     candidate_numbers = quantity_tokens(candidate)
-    if query_numbers and candidate_numbers and not query_numbers <= candidate_numbers:
-        return True
+    if query_numbers:
+        if not candidate_numbers or not query_numbers <= candidate_numbers:
+            return True
 
     query_classes = fat_variant_classes(query)
     candidate_classes = fat_variant_classes(candidate)
-    return bool(
-        query_classes and candidate_classes and query_classes.isdisjoint(candidate_classes)
-    )
+    if query_classes:
+        if not candidate_classes or candidate_classes != query_classes:
+            return True
+
+    return False
 
 
 def is_token_subset(query: str, candidate: str) -> bool:

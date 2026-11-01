@@ -5,6 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from nutrition_agent.balance import build_balance_verdict
 from nutrition_agent.repository import (
     get_food_logs_in_range,
     get_user_profile,
@@ -296,3 +297,70 @@ def generate_period_report(
         lines.extend(render_bar_chart(weight_chart, width=16))
 
     return "\n".join(lines)
+
+
+def format_balance_report(verdict: dict[str, object]) -> str:
+    """Format the maintenance balance and the mass it explains.
+
+    Every derived number is labelled as an estimate, and a comparison the data cannot
+    support is stated as unknown instead of being filled in.
+    """
+    days = verdict["logged_days"]
+    window = verdict["window_days"]
+    surplus = verdict["surplus"]
+    balance = verdict["balance_kcal"]
+
+    lines = [
+        f"=== Bilance proti maintenance ({verdict['start_date']} až {verdict['end_date']}) ===",
+        f"Zaznamenaných dní: {days} z {window}",
+        f"Příjem:            {verdict['intake_kcal']:.0f} kcal",
+        f"Maintenance:       {verdict['maintenance_kcal']:.0f} kcal",
+        f"Bilance:           {balance:+.0f} kcal ({'přebytek' if surplus else 'deficit'})",
+    ]
+
+    if days:
+        per_day = balance / days
+        estimate = verdict["estimated_kg"]
+        lines.append(f"Ø na zaznamenaný den: {per_day:+.0f} kcal")
+        lines.append(
+            f"Odhad hmoty:       {estimate:+.2f} kg "
+            f"({verdict['kcal_per_kg']:.0f} kcal/kg, "
+            f"{'70 % svaly / 30 % tuk' if surplus else 'převážně tuk'})"
+        )
+        if surplus and estimate > 0:
+            lines.append(
+                f"  z toho svaly:    {verdict['estimated_lean_kg']:+.2f} kg "
+                f"| tuk: {verdict['estimated_fat_kg']:+.2f} kg"
+            )
+
+    measured = verdict["measured_kg"]
+    if measured is None:
+        lines.append("Skutečná změna:    nelze změřit (v okně nejsou aspoň dvě vážení)")
+    else:
+        lines.append(
+            f"Skutečná změna:    {verdict['first_weight_kg']:.1f} → "
+            f"{verdict['last_weight_kg']:.1f} kg = {measured:+.2f} kg"
+        )
+        lines.append(
+            f"Odchylka:          {verdict['deviation_kg']:+.2f} kg "
+            f"({verdict['deviation_percent']:+.0f} % proti odhadu)"
+        )
+
+    for warning in verdict["warnings"]:
+        lines.append(f"Poznámka: {warning}")
+
+    lines.append("")
+    lines.append(
+        "Model: tuk 7700 kcal/kg, svaly 1800 kcal/kg, u přebytku 70 % hmoty do svalů. "
+        "Je to odhad, ne měření."
+    )
+    return "\n".join(lines)
+
+
+def generate_balance_report(
+    conn: sqlite3.Connection,
+    days: int = 30,
+    ref_date: datetime | None = None,
+) -> str:
+    """Build and format the maintenance balance for the last finished `days`."""
+    return format_balance_report(build_balance_verdict(conn, days=days, ref_date=ref_date))

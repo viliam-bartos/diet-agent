@@ -43,8 +43,9 @@
 
       --valve-orange: #F05A22;
       --valve-orange-glow: rgba(240, 90, 34, 0.15);
-      --aperture-cyan: #00A3E0;
-      --aperture-cyan-glow: rgba(0, 163, 224, 0.15);
+      --status-green: #38A169;
+      --status-green-glow: rgba(56, 161, 105, 0.18);
+      --status-green-dark: #2F855A;
       --terminal-amber: #D98200;
 
       --font-display: 'Barlow Semi Condensed', -apple-system, sans-serif;
@@ -257,8 +258,9 @@
       transition: width 0.25s ease-out;
     }
 
+    .kpi-bar-fill.met,
     .kpi-bar-fill.over {
-      background: var(--aperture-cyan);
+      background: var(--status-green);
     }
 
     .kpi-bar-fill.empty {
@@ -634,11 +636,11 @@
     }
 
     .week-balance.surplus {
-      color: var(--valve-orange);
+      color: var(--status-green-dark);
     }
 
     .week-balance.deficit {
-      color: var(--aperture-cyan);
+      color: var(--ink-secondary);
     }
 
     .week-balance.neutral {
@@ -665,6 +667,13 @@
       gap: 6px;
       margin-top: 16px;
       flex-wrap: wrap;
+    }
+
+    /* Balance against maintenance: three short columns and a model note. */
+    .balance-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 18px;
     }
 
     .week-day {
@@ -699,11 +708,11 @@
     }
 
     .week-day .wd-delta.pos {
-      color: var(--valve-orange);
+      color: var(--status-green-dark);
     }
 
     .week-day .wd-delta.neg {
-      color: var(--aperture-cyan);
+      color: var(--ink-secondary);
     }
 
     .week-day .wd-workout {
@@ -783,9 +792,9 @@
       outline-offset: 1px;
     }
 
-    /* Day detail panel */
+    /* Day detail panel - Seznam jídel za ten den */
     .day-panel {
-      display: none;
+      display: block;
       background: var(--bg-sheet);
       border: var(--border-technical);
       padding: 22px;
@@ -793,17 +802,13 @@
       box-shadow: 4px 4px 0px rgba(24, 24, 26, 0.8);
     }
 
-    .day-panel.open {
-      display: block;
-    }
-
     .day-panel-header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: flex-start;
       gap: 16px;
       margin-bottom: 16px;
-      padding-bottom: 10px;
+      padding-bottom: 12px;
       border-bottom: var(--border-subtle);
       flex-wrap: wrap;
     }
@@ -813,20 +818,56 @@
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .day-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .day-status-pill.green {
+      background: #DEF7EC;
+      color: #03543F;
+      border: 1px solid #31C48D;
+    }
+
+    .day-status-pill.amber {
+      background: #FEEBC8;
+      color: #7B341E;
+      border: 1px solid #F6AD55;
+    }
+
+    .day-status-pill.empty {
+      background: #E6DFC5;
+      color: var(--ink-secondary);
+      border: 1px solid rgba(24, 24, 26, 0.2);
     }
 
     .day-panel-totals {
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--ink-secondary);
-      line-height: 1.7;
+      line-height: 1.8;
     }
 
     .day-item {
       display: flex;
       justify-content: space-between;
+      align-items: center;
       gap: 14px;
-      padding: 8px 0;
+      padding: 10px 0;
       border-bottom: var(--border-subtle);
       font-size: 14px;
       flex-wrap: wrap;
@@ -836,7 +877,7 @@
       font-family: var(--font-mono);
       font-size: 12px;
       color: var(--ink-muted);
-      min-width: 46px;
+      min-width: 48px;
     }
 
     .day-item-name {
@@ -850,11 +891,68 @@
       color: var(--ink-secondary);
     }
 
+    .day-item-actions {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .btn-day-edit {
+      padding: 3px 8px;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      background: var(--bg-cardboard);
+      border: 1px solid rgba(24, 24, 26, 0.3);
+      cursor: pointer;
+    }
+
+    .btn-day-edit:hover {
+      background: var(--bg-cardboard-dark);
+    }
+
     .day-empty {
       font-family: var(--font-mono);
       font-size: 13px;
       color: var(--ink-muted);
-      padding: 10px 0;
+      padding: 14px 0;
+    }
+
+    .kpi-badge-met {
+      color: #2F855A;
+      font-weight: 700;
+    }
+
+    /* Balance buttons & details */
+    .balance-btn-group {
+      display: flex;
+      gap: 6px;
+      margin-top: 10px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+
+    .balance-btn {
+      padding: 4px 10px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      background: var(--bg-cardboard);
+      border: var(--border-subtle);
+      cursor: pointer;
+    }
+
+    .balance-btn.active {
+      background: var(--ink-primary);
+      color: var(--bg-paper);
+    }
+
+    .balance-details-box {
+      background: var(--bg-paper);
+      border: var(--border-subtle);
+      padding: 12px 14px;
+      margin-top: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
     }
 
     /* A broken render must say so instead of leaving empty cards behind. */
@@ -950,6 +1048,41 @@
       <div class="week-days" id="weekDays"></div>
     </div>
 
+    <!-- Balance against maintenance -->
+    <div class="dashboard-section">
+      <div class="section-header">
+        <div>
+          <div class="section-title" id="balanceLabel">Bilance proti maintenance</div>
+          <div class="balance-btn-group">
+            <button type="button" class="balance-btn active" id="balBtnLatest" onclick="changeBalancePeriod('latest')">Poslední aktivní období</button>
+            <button type="button" class="balance-btn" id="balBtnMonth" onclick="changeBalancePeriod('month')">Září 2026</button>
+            <button type="button" class="balance-btn" id="balBtnCurrent" onclick="changeBalancePeriod('current')">Posledních 30 dní</button>
+          </div>
+        </div>
+        <div class="kpi-value" style="margin: 0; font-size: 22px;">
+          <span id="balanceKcal">--</span> <span class="kpi-unit">kcal</span>
+        </div>
+      </div>
+      <div class="balance-grid">
+        <div>
+          <div class="kpi-label">Příjem / maintenance</div>
+          <div class="kpi-subtext" id="balanceIntake">--</div>
+        </div>
+        <div>
+          <div class="kpi-label">Odhad hmoty (svaly / tuk)</div>
+          <div class="kpi-subtext" id="balanceEstimate">--</div>
+        </div>
+        <div>
+          <div class="kpi-label">Skutečná váha / odchylka</div>
+          <div class="kpi-subtext" id="balanceMeasured">--</div>
+        </div>
+      </div>
+      <div class="balance-details-box" id="balanceDeviationBox">
+        <span id="balanceDeviationText">--</span>
+      </div>
+      <div class="kpi-subtext" id="balanceNote" style="margin-top: 10px;"></div>
+    </div>
+
     <!-- Weight Trend Chart -->
     <div class="dashboard-section">
       <div class="section-header">
@@ -980,7 +1113,7 @@
       </div>
       <div class="heatmap-legend">
         <div class="legend-item">
-          <div class="legend-box level-green"></div> Splněno: kalorie i bílkoviny ≥90 % cíle
+          <div class="legend-box level-green"></div> Splněno: kalorie i bílkoviny ≥90 % cíle (zelená)
         </div>
         <div class="legend-item">
           <div class="legend-box level-amber"></div> Záznam, ale pod 90 % u kalorií nebo bílkovin
@@ -994,14 +1127,14 @@
       </div>
     </div>
 
-    <!-- Selected day detail -->
+    <!-- Selected day detail (Seznam jídel za den) -->
     <div id="dayPanel" class="day-panel">
       <div class="day-panel-header">
         <div>
-          <div class="day-panel-title" id="dayPanelTitle">Den</div>
+          <div class="day-panel-title" id="dayPanelTitle">Seznam jídel za den</div>
           <div class="day-panel-totals" id="dayPanelTotals"></div>
         </div>
-        <button type="button" onclick="closeDayPanel()">Zavřít</button>
+        <button type="button" id="dayPanelResetBtn" onclick="clearSelectedDay()" style="display: none;">Zpět na dnešek</button>
       </div>
       <div id="dayPanelItems"></div>
     </div>
@@ -1093,7 +1226,97 @@
     }
 
     async function fetchData() {
-      await Promise.all([loadDay(), loadWeek(), loadWeightTrend(), loadHeatmap(), loadRecords()]);
+      await Promise.all([
+        loadDay(),
+        loadWeek(),
+        loadWeightTrend(),
+        loadHeatmap(),
+        loadRecords(),
+        loadBalance(),
+      ]);
+    }
+
+    let currentBalancePeriod = 'latest';
+
+    async function changeBalancePeriod(period) {
+      currentBalancePeriod = period;
+      const btnLatest = document.getElementById('balBtnLatest');
+      const btnMonth = document.getElementById('balBtnMonth');
+      const btnCurrent = document.getElementById('balBtnCurrent');
+      if (btnLatest) btnLatest.classList.toggle('active', period === 'latest');
+      if (btnMonth) btnMonth.classList.toggle('active', period === 'month');
+      if (btnCurrent) btnCurrent.classList.toggle('active', period === 'current');
+
+      let query = '';
+      if (period === 'month') {
+        query = '?end_date=2026-09-30&days=30';
+      } else if (period === 'current') {
+        query = '?end_date=' + todayIso() + '&days=30';
+      }
+      await loadBalance(query);
+    }
+
+    async function loadBalance(queryParam = '') {
+      try {
+        const url = queryParam ? `/api/balance${queryParam}` : '/api/balance?days=30';
+        const data = await (await fetch(url)).json();
+        const balance = data.balance_kcal;
+        const balanceEl = document.getElementById('balanceKcal');
+
+        balanceEl.textContent = `${balance > 0 ? '+' : ''}${Math.round(balance)}`;
+        balanceEl.className = 'week-balance ' +
+          (balance > 0 ? 'surplus' : balance < 0 ? 'deficit' : 'neutral');
+
+        document.getElementById('balanceLabel').textContent =
+          `Bilance proti maintenance (${formatDate(data.start_date)} až ${formatDate(data.end_date)})`;
+
+        document.getElementById('balanceIntake').textContent =
+          `${Math.round(data.intake_kcal)} / ${Math.round(data.maintenance_kcal)} kcal | ` +
+          `${data.logged_days} z ${data.window_days} dní`;
+
+        const estimate = data.estimated_kg;
+        document.getElementById('balanceEstimate').textContent = data.logged_days
+          ? `${estimate > 0 ? '+' : ''}${estimate.toFixed(2)} kg ` +
+            `(${data.surplus
+              ? `svaly ${data.estimated_lean_kg.toFixed(2)} kg + tuk ${data.estimated_fat_kg.toFixed(2)} kg`
+              : 'převážně tuk'}, ${Math.round(data.kcal_per_kg)} kcal/kg)`
+          : 'bez záznamu';
+
+        if (data.measured_kg === null) {
+          document.getElementById('balanceMeasured').textContent =
+            'nelze změřit: chybí dvě vážení v okně';
+        } else {
+          const percent = data.deviation_percent;
+          const startWeight = data.first_weight_kg != null ? `${data.first_weight_kg.toFixed(1)} kg` : '';
+          const endWeight = data.last_weight_kg != null ? `${data.last_weight_kg.toFixed(1)} kg` : '';
+          const weightRange = startWeight && endWeight ? ` (${startWeight} -> ${endWeight})` : '';
+          document.getElementById('balanceMeasured').textContent =
+            `${data.measured_kg > 0 ? '+' : ''}${data.measured_kg.toFixed(2)} kg${weightRange} | ` +
+            `odchylka ${data.deviation_kg > 0 ? '+' : ''}${data.deviation_kg.toFixed(2)} kg` +
+            (percent !== null ? ` (${percent > 0 ? '+' : ''}${percent.toFixed(0)} %)` : '');
+        }
+
+        const devBox = document.getElementById('balanceDeviationBox');
+        const devText = document.getElementById('balanceDeviationText');
+        if (devBox && devText) {
+          if (data.deviation_note) {
+            devText.textContent = data.deviation_note;
+            devBox.style.display = 'block';
+          } else if (data.measured_kg !== null && data.deviation_kg !== null) {
+            devText.textContent = `Odchylka modelu od reálné váhy: ${data.deviation_kg > 0 ? '+' : ''}${data.deviation_kg.toFixed(2)} kg.`;
+            devBox.style.display = 'block';
+          } else {
+            devBox.style.display = 'none';
+          }
+        }
+
+        document.getElementById('balanceNote').textContent = data.warnings.length
+          ? data.warnings.join(' ')
+          : 'Odhad podle modelu: tuk 7700 kcal/kg, svaly 1800 kcal/kg, 70 % hmoty do svalů.';
+      } catch (err) {
+        console.error('Chyba při načítání bilance:', err);
+        showError(`Nepodařilo se načíst bilanci proti maintenance: ${err}`);
+      }
     }
 
     function todayIso() {
@@ -1197,14 +1420,19 @@
 
       const percent = (consumed / target) * 100;
       bar.style.width = `${Math.min(percent, 100)}%`;
-      bar.className = 'kpi-bar-fill' + (percent > 105 ? ' over' : '');
+      const isMet = percent >= 90;
+      bar.className = 'kpi-bar-fill' + (isMet ? ' met' : '');
 
       const remaining = target - consumed;
       const left = remaining >= 0
         ? `zbývá ${remaining.toFixed(decimals)}`
         : `překročeno o ${Math.abs(remaining).toFixed(decimals)}`;
-      targetEl.textContent =
-        `Cíl: ${target.toFixed(decimals)} ${unit} | ${percent.toFixed(0)} % | ${left}` +
+      const statusPill = isMet
+        ? `<span class="kpi-badge-met">✓ Splněno (${percent.toFixed(0)} %)</span>`
+        : `<span>${percent.toFixed(0)} %</span>`;
+
+      targetEl.innerHTML =
+        `Cíl: ${target.toFixed(decimals)} ${unit} | ${statusPill} | ${left}` +
         (note ? ` | ${note}` : '');
     }
 
@@ -1215,8 +1443,19 @@
 
         if (!checkVersion(data, REQUIRED_DAY_FIELDS)) return;
 
-        document.getElementById('activeGoalDisplay').textContent =
-          `${data.goal.toUpperCase()} // ${data.day_type.toUpperCase()}`;
+        const calsMet = data.target_calories > 0 && (data.calories / data.target_calories) >= 0.90;
+        const protMet = data.target_protein > 0 && (data.protein_usable / data.target_protein) >= 0.90;
+        const dayMet = calsMet && protMet;
+
+        const goalDisplay = document.getElementById('activeGoalDisplay');
+        const badgeDot = document.querySelector('.badge-dot');
+        if (dayMet) {
+          if (badgeDot) badgeDot.style.background = '#38A169';
+          goalDisplay.innerHTML = `${data.goal.toUpperCase()} // ${data.day_type.toUpperCase()} <span style="color: #2F855A; margin-left: 6px; font-weight: 700;">[CELÝ DEN SPLNĚN ✓]</span>`;
+        } else {
+          if (badgeDot) badgeDot.style.background = 'var(--valve-orange)';
+          goalDisplay.textContent = `${data.goal.toUpperCase()} // ${data.day_type.toUpperCase()}`;
+        }
 
         renderMacroCard('kpiCals', 'kpiCalsBar', 'kpiCalsTarget',
           data.calories, data.target_calories, 'kcal', 0);
@@ -1482,11 +1721,8 @@
       // leave the "writing on <date>" hint and its way back on screen.
       selectedDay = day === todayIso() ? '' : day;
       await Promise.all([loadDay(), loadHeatmap(), loadWeek()]);
-      if (day) {
-        await showDayPanel(day);
-      } else {
-        closeDayPanel();
-      }
+      // The panel always shows the day that is being written to, today by default.
+      await showDayPanel(day || todayIso());
     }
 
     async function showDayPanel(day) {
@@ -1494,25 +1730,35 @@
       const panel = document.getElementById('dayPanel');
       const verdict = data.adherence || {};
 
-      const verdictText = verdict.level === 'green'
-        ? 'splněno'
-        : verdict.level === 'empty'
-          ? 'bez záznamu'
-          : 'pod cílem';
-      const ratioText = verdict.threshold
-        ? ` (kalorie ${Math.round((verdict.calorie_ratio || 0) * 100)} %, ` +
-          `bílkoviny ${Math.round((verdict.protein_ratio || 0) * 100)} %, ` +
-          `hranice ${Math.round(verdict.threshold * 100)} %)`
-        : '';
+      const titleEl = document.getElementById('dayPanelTitle');
+      let statusPillHtml = '';
+      if (verdict.level === 'green') {
+        statusPillHtml = '<span class="day-status-pill green">✓ Celý den splněn (≥90 % kcal i bílkoviny)</span>';
+      } else if (verdict.level === 'amber') {
+        statusPillHtml = '<span class="day-status-pill amber">Pod cílem (&lt;90 % kcal nebo bílkovin)</span>';
+      } else {
+        statusPillHtml = '<span class="day-status-pill empty">Bez záznamu</span>';
+      }
+      const dayTypeDesc = data.day_type === 'training' ? 'Tréninkový den' : 'Odpočinkový den';
+      titleEl.innerHTML = `<span>Jídelníček: ${formatDate(day)} (${dayTypeDesc})</span> ${statusPillHtml}`;
 
-      document.getElementById('dayPanelTitle').textContent = formatDate(day);
+      const resetBtn = document.getElementById('dayPanelResetBtn');
+      if (resetBtn) {
+        resetBtn.style.display = (day && day !== todayIso()) ? 'inline-block' : 'none';
+      }
+
+      const kcalPct = data.target_calories > 0 ? Math.round((data.calories / data.target_calories) * 100) : 0;
+      const protPct = data.target_protein > 0 ? Math.round((data.protein_usable / data.target_protein) * 100) : 0;
+      const kcalColor = kcalPct >= 90 ? 'color: #2F855A; font-weight: 700;' : '';
+      const protColor = protPct >= 90 ? 'color: #2F855A; font-weight: 700;' : '';
+
       document.getElementById('dayPanelTotals').innerHTML =
-        `Den: ${verdictText}${ratioText}<br>` +
-        `${Math.round(data.calories)} / ${Math.round(data.target_calories)} kcal | ` +
-        `${data.protein_usable.toFixed(1)} / ${data.target_protein.toFixed(1)} g DIAAS | ` +
-        `${data.carbs.toFixed(1)} g sacharidů | ${data.fats.toFixed(1)} g tuků` +
-        (data.weight_kg != null ? `<br>Váha: ${data.weight_kg.toFixed(1)} kg` : '') +
-        (data.has_workout ? `<br>Trénink: ${data.workout_type}` : '');
+        `<span style="${kcalColor}">Kalorie: ${Math.round(data.calories)} / ${Math.round(data.target_calories)} kcal (${kcalPct} %)</span> &bull; ` +
+        `<span style="${protColor}">Bílkoviny: ${data.protein_usable.toFixed(1)} / ${data.target_protein.toFixed(1)} g DIAAS (${protPct} %)</span> &bull; ` +
+        `<span>Sacharidy: ${data.carbs.toFixed(1)} g</span> &bull; ` +
+        `<span>Tuky: ${data.fats.toFixed(1)} g</span>` +
+        (data.weight_kg != null ? ` &bull; <span>Váha: ${data.weight_kg.toFixed(1)} kg</span>` : '') +
+        (data.has_workout ? ` &bull; <span>Trénink: ${data.workout_type || 'Ano'}</span>` : '');
 
       const itemsEl = document.getElementById('dayPanelItems');
       itemsEl.innerHTML = '';
@@ -1526,15 +1772,42 @@
           const time = item.logged_at ? item.logged_at.slice(11, 16) : '';
           const el = document.createElement('div');
           el.className = 'day-item';
-          el.innerHTML =
-            `<span class="day-item-time">${time}</span>` +
-            `<span class="day-item-name">${item.name} (${Math.round(item.amount_g)} g)` +
+
+          const timeEl = document.createElement('span');
+          timeEl.className = 'day-item-time';
+          timeEl.textContent = time;
+
+          const nameEl = document.createElement('span');
+          nameEl.className = 'day-item-name';
+          nameEl.textContent = `${item.name} (${Math.round(item.amount_g)} g)` +
             (item.nutrition_source === 'ai' ? ' [AI odhad]' : '') +
-            (item.nutrition_source === 'manual' ? ' [ruční korekce]' : '') + '</span>' +
-            `<span class="day-item-macros">${item.calories.toFixed(0)} kcal | ` +
-            `B ${item.protein_usable.toFixed(1)} g | S ${item.carbs.toFixed(1)} g | ` +
-            `T ${item.fats.toFixed(1)} g</span>` +
-            `<span><button class="btn-delete" onclick="deleteRecord('food', ${item.id})">Smazat</button></span>`;
+            (item.nutrition_source === 'manual' ? ' [ruční korekce]' : '');
+
+          const macrosEl = document.createElement('span');
+          macrosEl.className = 'day-item-macros';
+          macrosEl.textContent = `${Math.round(item.calories)} kcal | B ${item.protein_usable.toFixed(1)} g | S ${item.carbs.toFixed(1)} g | T ${item.fats.toFixed(1)} g`;
+
+          const actionsEl = document.createElement('span');
+          actionsEl.className = 'day-item-actions';
+
+          const editBtn = document.createElement('button');
+          editBtn.className = 'btn-day-edit';
+          editBtn.textContent = 'Upravit';
+          editBtn.onclick = () => openEditDialog(item);
+
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn-delete';
+          delBtn.textContent = 'Smazat';
+          delBtn.onclick = () => deleteRecord('food', item.id);
+
+          actionsEl.appendChild(editBtn);
+          actionsEl.appendChild(delBtn);
+
+          el.appendChild(timeEl);
+          el.appendChild(nameEl);
+          el.appendChild(macrosEl);
+          el.appendChild(actionsEl);
+
           itemsEl.appendChild(el);
         });
       }
@@ -1766,7 +2039,8 @@
         }
 
         closeEditDialog();
-        fetchData();
+        await fetchData();
+        await showDayPanel(selectedDay || todayIso());
       } catch (err) {
         errorEl.textContent = 'Chyba při ukládání: ' + err;
         errorEl.style.display = 'block';
@@ -1785,7 +2059,7 @@
           return;
         }
         fetchData();
-        if (selectedDay) await showDayPanel(selectedDay);
+        await showDayPanel(selectedDay || todayIso());
       } catch (err) {
         alert('Chyba při mazání: ' + err);
       }
@@ -1820,15 +2094,16 @@
         feedback.textContent = result.reply;
         input.value = '';
         await fetchData();
-        if (selectedDay) await showDayPanel(selectedDay);
+        await showDayPanel(selectedDay || todayIso());
       } catch (err) {
         feedback.style.color = '#b21f2d';
         feedback.textContent = 'Chyba při odesílání: ' + err;
       }
     }
 
-    // Initial load
-    fetchData();
+    // Initial load: the day panel is opened for today, so the meals of the day are on
+    // screen without having to pick the day in the calendar first.
+    fetchData().then(() => showDayPanel(selectedDay || todayIso()));
   </script>
 </body>
 

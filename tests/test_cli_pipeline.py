@@ -453,6 +453,31 @@ def test_den_command_changes_one_day_only(
     assert get_day_type(conn, today) == DayType.TRAINING
 
 
+def test_balance_command_reports_against_maintenance(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """'bilance' prints the maintenance balance and names what the model assumes."""
+    conn, foods = test_setup
+
+    result = handle_user_message("bilance 30", foods, conn)
+
+    assert "Bilance proti maintenance" in result
+    assert "Maintenance:" in result
+    assert "Je to odhad, ne měření" in result
+    # Without any weigh-in the deviation cannot be measured and must say so.
+    assert "nelze změřit" in result
+
+
+def test_balance_command_rejects_a_bad_window(
+    test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
+) -> None:
+    """A window that is not a positive number returns usage, not a traceback."""
+    conn, foods = test_setup
+
+    assert "Použití: bilance" in handle_user_message("bilance hodne", foods, conn)
+    assert "kladné číslo" in handle_user_message("bilance 0", foods, conn)
+
+
 def test_handle_weight_log_recomputes_targets(
     test_setup: tuple[sqlite3.Connection, list[FoodDefinition]],
 ) -> None:

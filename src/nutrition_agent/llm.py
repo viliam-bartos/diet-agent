@@ -188,9 +188,12 @@ v jeho lokálním katalogu. Odhadni její nutriční hodnoty na 100 g v syrovém
 
 Pravidla:
 1. Vrátíš pouze JSON podle schématu EstimatedFoodNutrition.
-2. Hodnoty uváděj na 100 g. U tekutin na 100 ml.
-3. Vycházej z typických hodnot dané potraviny. Pokud jde o hotové jídlo, uváděj hodnoty
-   hotového jídla tak, jak se jí.
+2. V poli 'name' VŽDY přesně zachovej název a specifikovanou variantu zadanou uživatelem včetně
+   procent a tučnosti (např. 'gouda 48%', 'gouda 45%', 'mléko polotučné', 'tvaroh odtučněný').
+   Nikdy 'polotučné' nepřepisuj na 'plnotučné' ani neměň procenta!
+3. Hodnoty uváděj na 100 g. U tekutin na 100 ml.
+4. Vycházej z typických hodnot dané potraviny a její konkrétní varianty (např. polotučné mléko 1.5% tuku,
+   plnotučné 3.5% tuku). Pokud jde o hotové jídlo, uváděj hodnoty hotového jídla tak, jak se jí.
 4. Kategorie bílkovin (protein_category):
    - 'animal': maso, ryby, vejce, mléčné výrobky, syrovátkový protein
    - 'plant_isolate': sójový nebo hrachový izolát, tofu
