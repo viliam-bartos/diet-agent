@@ -17,14 +17,9 @@ from nutrition_agent.balance import (
     estimate_mass_change,
 )
 from nutrition_agent.db import SCHEMA_SQL, get_connection
-from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog, CalculatedWorkoutLog
+from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog
 from nutrition_agent.reporting import format_balance_report
-from nutrition_agent.repository import (
-    get_calorie_offset,
-    save_food_logs,
-    save_weight_log,
-    save_workout_log,
-)
+from nutrition_agent.repository import get_calorie_offset, save_food_logs, save_weight_log
 
 
 def test_energy_per_kg_of_gain_mixes_lean_and_fat():
@@ -223,7 +218,7 @@ def test_maintenance_calibration_requires_weigh_ins_and_shifts_targets():
 
 
 def test_maintenance_calibration_with_measured_gain_calculates_correct_maintenance():
-    """A gain of 1.2 kg on ~353 kcal/day surplus sets maintenance to ~2668 kcal/day (+80 kcal)."""
+    """A gain of 1.2 kg on a ~353 kcal/day surplus calibrates maintenance to ~2668 kcal/day (+80 kcal)."""
     conn = get_connection(":memory:")
     conn.executescript(SCHEMA_SQL)
 
