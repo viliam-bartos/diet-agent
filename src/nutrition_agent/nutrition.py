@@ -70,6 +70,14 @@ FOOD_SYNONYMS: dict[str, str] = {
     "vejce": "vejce (celé)",
     "olej": "olivový olej",
     "tofu": "tofu bílé",
+    "toust": "toustový chléb pšeničný",
+    "tousty": "toustový chléb pšeničný",
+    "toast": "toustový chléb pšeničný",
+    "toasty": "toustový chléb pšeničný",
+    "toustový chléb": "toustový chléb pšeničný",
+    "toustový chleba": "toustový chléb pšeničný",
+    "toastový chléb": "toustový chléb pšeničný",
+    "toastový chleba": "toustový chléb pšeničný",
 }
 
 # Same synonyms keyed without diacritics, so 'ryze' resolves like 'rýže'.
@@ -180,6 +188,22 @@ def validate_body_weight(weight_kg: float) -> float:
     return weight_kg
 
 
+# Colloquial word forms normalized during tokenization so 'chleba' matches 'chléb'
+# and 'toast' matches 'toust'.
+TOKEN_NORMALIZATION: dict[str, str] = {
+    "chleba": "chleb",
+    "toast": "toust",
+    "toasty": "toust",
+    "tousty": "toust",
+    "toastovy": "toustovy",
+}
+
+# Prepositions and conjunctions that join a second ingredient or topping
+# ('toust s marmeládou', 'toustový chleba s marmeládou', 'chléb se šunkou', 'vejce na slanině').
+# A simple ingredient query must never match a compound dish that adds extra ingredients.
+COMPOUND_DISH_CONNECTORS: frozenset[str] = frozenset({"s", "se", "a", "na"})
+
+
 def food_tokens(name: str) -> set[str]:
     """Split a food name into comparable lowercase tokens, ignoring punctuation.
 
@@ -187,7 +211,11 @@ def food_tokens(name: str) -> set[str]:
     diacritics, especially on mobile.
     """
     folded = strip_diacritics(name.lower())
-    return {token for token in re.split(r"[^\w]+", folded) if token}
+    return {
+        TOKEN_NORMALIZATION.get(token, token)
+        for token in re.split(r"[^\w]+", folded)
+        if token
+    }
 
 
 # Numbers in a food name, e.g. the fat content of a cheese or a cocoa share.
@@ -245,17 +273,17 @@ def names_contradict(query: str, candidate: str) -> bool:
     """
     query_numbers = quantity_tokens(query)
     candidate_numbers = quantity_tokens(candidate)
-    if query_numbers:
-        if not candidate_numbers or not query_numbers <= candidate_numbers:
-            return True
+    if query_numbers and (not candidate_numbers or not query_numbers <= candidate_numbers):
+        return True
 
     query_classes = fat_variant_classes(query)
     candidate_classes = fat_variant_classes(candidate)
-    if query_classes:
-        if not candidate_classes or candidate_classes != query_classes:
-            return True
+    if query_classes and (not candidate_classes or candidate_classes != query_classes):
+        return True
 
-    return False
+    query_toks = food_tokens(query)
+    candidate_toks = food_tokens(candidate)
+    return bool((candidate_toks & COMPOUND_DISH_CONNECTORS) - query_toks)
 
 
 def is_token_subset(query: str, candidate: str) -> bool:

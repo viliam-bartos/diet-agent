@@ -1321,12 +1321,15 @@
           } else {
             const delta = Math.round(cal.recommended_delta_kcal || 0);
             const rec = Math.round(cal.recommended_maintenance_kcal || 0);
+            const slopeWeek = typeof cal.slope_kg_per_week === 'number'
+              ? ` | trend ${cal.slope_kg_per_week > 0 ? '+' : ''}${cal.slope_kg_per_week.toFixed(2)} kg/týden`
+              : '';
             if (Math.abs(delta) >= 1) {
               const sign = delta > 0 ? '+' : '';
-              calEl.textContent = `${rec} kcal/den (${sign}${delta} kcal)`;
+              calEl.textContent = `${rec} kcal/den (${sign}${delta} kcal)${slopeWeek}`;
               calBtn.style.display = 'inline-block';
             } else {
-              calEl.textContent = `${rec} kcal/den (kalibrováno)`;
+              calEl.textContent = `${rec} kcal/den (kalibrováno)${slopeWeek}`;
               calBtn.style.display = 'none';
             }
           }

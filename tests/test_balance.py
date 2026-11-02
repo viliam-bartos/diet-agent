@@ -17,9 +17,14 @@ from nutrition_agent.balance import (
     estimate_mass_change,
 )
 from nutrition_agent.db import SCHEMA_SQL, get_connection
-from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog
+from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog, CalculatedWorkoutLog
 from nutrition_agent.reporting import format_balance_report
-from nutrition_agent.repository import get_calorie_offset, save_food_logs, save_weight_log
+from nutrition_agent.repository import (
+    get_calorie_offset,
+    save_food_logs,
+    save_weight_log,
+    save_workout_log,
+)
 
 
 def test_energy_per_kg_of_gain_mixes_lean_and_fat():
@@ -218,7 +223,7 @@ def test_maintenance_calibration_requires_weigh_ins_and_shifts_targets():
 
 
 def test_maintenance_calibration_with_measured_gain_calculates_correct_maintenance():
-    """A gain of 1.2 kg on a ~353 kcal/day surplus calibrates maintenance to ~2668 kcal/day (+80 kcal)."""
+    """A 1.2 kg gain on ~353 kcal/day surplus calibrates maintenance to ~2668 kcal/day (+80)."""
     conn = get_connection(":memory:")
     conn.executescript(SCHEMA_SQL)
 
@@ -288,3 +293,73 @@ def test_maintenance_calibration_with_measured_gain_calculates_correct_maintenan
     assert applied["applied"] is True
     assert applied["applied_delta_kcal"] == 80.0
     assert get_calorie_offset(conn) == 80.0
+
+
+def test_maintenance_calibration_uses_ols_slope_across_irregular_noisy_weigh_ins():
+    """Irregular weigh-ins with water noise use OLS slope (kg/day), not raw endpoints."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    ref = datetime(2026, 11, 2)
+    for i in range(30):
+        d = (ref - timedelta(days=30 - i)).strftime("%Y-%m-%d")
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{d}T12:00:00+00:00",
+                    raw_input="food",
+                    food_name_matched="food",
+                    amount_g=100.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=2941.5,
+                    protein_raw=150.0,
+                    protein_usable=150.0,
+                    carbs=300.0,
+                    fats=80.0,
+                )
+            ],
+        )
+        if i % 5 in (0, 2):
+            save_workout_log(
+                conn,
+                CalculatedWorkoutLog(
+                    logged_at=f"{d}T18:00:00+00:00",
+                    raw_input="trenink",
+                    workout_type="Silový trénink",
+                    duration_minutes=60,
+                ),
+            )
+
+    # 7 weigh-ins spread across 19 calendar days (day offsets 0..18) inside the 30-day window.
+    # True underlying trend: 82.0 kg + 0.04 kg/day (+0.28 kg/week, +0.76 kg over 19 days),
+    # plus zero-covariance water noise (+0.35 kg at start, -0.35 kg at end).
+    offsets_from_day4 = [0, 3, 6, 9, 12, 15, 18]
+    noise = [0.35, -0.40, -0.25, 0.0, 0.25, 0.40, -0.35]
+    for offset, err in zip(offsets_from_day4, noise, strict=True):
+        day_str = (ref - timedelta(days=27 - offset)).strftime("%Y-%m-%d")
+        true_w = 82.0 + 0.04 * (offset * 19.0 / 18.0)
+        save_weight_log(
+            conn,
+            CalculatedWeightLog(
+                logged_at=f"{day_str}T07:00:00+00:00",
+                raw_input="w",
+                weight_kg=round(true_w + err, 4),
+            ),
+        )
+
+    verdict = build_balance_verdict(conn, days=30, ref_date=ref)
+    cal = verdict["calibration"]
+    assert cal["ready"] is True
+    assert cal["weigh_ins_count"] == 7
+    assert cal["weigh_in_span_days"] == 19
+    # Raw endpoints would say (82.76 - 0.35) - (82.0 + 0.35) = +0.06 kg,
+    # whereas OLS regression recovers the true +0.76 kg over 19 days (+0.04 kg/day, +0.28 kg/week).
+    assert cal["delta_kg"] == 0.76
+    assert verdict["measured_kg"] == 0.76
+    assert cal["slope_kg_per_day"] == 0.04
+    assert cal["slope_kg_per_week"] == 0.28
+    assert cal["recommended_maintenance_kcal"] == 2671.0
+    assert cal["recommended_delta_kcal"] == 104.0
+

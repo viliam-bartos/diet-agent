@@ -191,7 +191,7 @@ def test_low_fat_variant_does_not_match_a_semi_fat_candidate():
 
 
 def test_names_contradict_reports_both_kinds_of_variant():
-    """The check covers numbers and fat classes, requiring the candidate to match the stated variant."""
+    """The check covers numbers and fat classes, requiring candidate agreement."""
     assert names_contradict("gouda 48%", "gouda 45%") is True
     assert names_contradict("gouda 48%", "gouda 48%") is False
     assert names_contradict("eidam 30", "Eidam 30% tuku v sušině") is False
@@ -268,5 +268,41 @@ def test_milk_variant_resolution_does_not_conflate_semi_and_full(monkeypatch: py
     assert was_learned is True
     assert learned.name == "mléko polotučné"
     assert get_food(conn, "mléko polotučné") is not None
+
+
+def test_toust_resolves_to_toustovy_chleb_not_marmelada_dish():
+    """'toust' and 'toustový chleba' match 'Toustový chléb pšeničný', never marmalade dish."""
+    from nutrition_agent.models import FoodNotFoundError
+
+    foods = [
+        _food("Toustový chléb pšeničný", source="curated", calories=260.0),
+        _food("toust s marmeládou", source="ai", calories=262.0),
+        _food("toustový chleba s marmeládou", source="ai", calories=262.0),
+    ]
+    queries = (
+        "toust",
+        "tousty",
+        "toast",
+        "toustový chleba",
+        "toustový chléb",
+        "chleba toustový",
+    )
+    for query in queries:
+        matched, _ = find_matching_food(query, foods)
+        assert matched.name == "Toustový chléb pšeničný", query
+
+    # Compound dishes must not match a simple base query even if the base food is missing.
+    compound_only = [
+        _food("toust s marmeládou", source="ai", calories=262.0),
+        _food("toustový chleba s marmeládou", source="ai", calories=262.0),
+    ]
+    for base_query in ("toust", "toustový chleba", "toustový chléb"):
+        with pytest.raises(FoodNotFoundError):
+            find_matching_food(base_query, compound_only)
+
+    # Explicitly asking for the compound dish still matches it.
+    dish, _ = find_matching_food("toust s marmeládou", foods)
+    assert dish.name == "toust s marmeládou"
+
 
 

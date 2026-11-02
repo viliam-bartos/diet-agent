@@ -122,12 +122,20 @@ def energy_for_mass_change(delta_kg: float) -> float:
     return delta_kg * GAIN_KCAL_PER_KG
 
 
+def _daily_weights_from_logs(weights) -> list[tuple[str, float]]:
+    """Collapse weight logs to one reading per local day, sorted chronologically."""
+    by_day: dict[str, float] = {}
+    for log in sorted(weights, key=lambda item: item.logged_at):
+        by_day[local_date(log.logged_at)] = log.weight_kg
+    return sorted(by_day.items(), key=lambda item: item[0])
+
+
 def _regression_weight_change(
     daily_weights: list[tuple[str, float]],
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, float, int]:
     """Fit a least-squares line over the weigh-ins to smooth out daily water noise.
 
-    Returns (trend_start_kg, trend_end_kg, delta_kg).
+    Returns (trend_start_kg, trend_end_kg, delta_kg, slope_kg_per_day, weigh_in_span_days).
     """
     start_dt = datetime.strptime(daily_weights[0][0], "%Y-%m-%d")
     xs = [float((datetime.strptime(day, "%Y-%m-%d") - start_dt).days) for day, _ in daily_weights]
@@ -136,16 +144,78 @@ def _regression_weight_change(
     mean_x = sum(xs) / n
     mean_y = sum(ys) / n
     denom = sum((x - mean_x) ** 2 for x in xs)
+    weigh_in_span_days = max(int(round(xs[-1])) + 1, 1)
     if denom <= 0:
         start_w = round(ys[0], 2)
         end_w = round(ys[-1], 2)
-        return start_w, end_w, round(end_w - start_w, 2)
+        return start_w, end_w, round(end_w - start_w, 2), 0.0, weigh_in_span_days
 
-    slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True)) / denom
-    intercept = mean_y - slope * mean_x
+    raw_slope = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys, strict=True)) / denom
+    intercept = mean_y - raw_slope * mean_x
     trend_start = intercept
-    trend_end = intercept + slope * xs[-1]
-    return round(trend_start, 2), round(trend_end, 2), round(trend_end - trend_start, 2)
+    trend_end = intercept + raw_slope * xs[-1]
+    raw_delta = trend_end - trend_start
+    slope_kg_per_day = raw_delta / weigh_in_span_days
+    return (
+        round(trend_start, 2),
+        round(trend_end, 2),
+        round(raw_delta, 2),
+        slope_kg_per_day,
+        weigh_in_span_days,
+    )
+
+
+def _cumulative_surplus_slope(
+    daily_weights: list[tuple[str, float]],
+    daily_surplus_by_day: dict[str, float],
+    fallback_daily_surplus: float,
+) -> float:
+    """Fit the effective daily energy surplus across the weigh-in trajectory via OLS.
+
+    Each weigh-in day anchors the cumulative energy surplus accumulated since the first
+    weigh-in, so periods with higher or lower intake are weighted along the same time axis
+    as the scale regression.
+    """
+    if len(daily_weights) < 2:
+        return fallback_daily_surplus
+
+    start_day_str = daily_weights[0][0]
+    start_dt = datetime.strptime(start_day_str, "%Y-%m-%d")
+    end_dt = datetime.strptime(daily_weights[-1][0], "%Y-%m-%d")
+    total_span_days = max((end_dt - start_dt).days + 1, 1)
+    raw_end_x = float((end_dt - start_dt).days)
+    if raw_end_x <= 0:
+        return fallback_daily_surplus
+
+    scale = total_span_days / raw_end_x
+    us: list[float] = []
+    es: list[float] = []
+
+    for day_str, _ in daily_weights:
+        curr_dt = datetime.strptime(day_str, "%Y-%m-%d")
+        raw_x = float((curr_dt - start_dt).days)
+        u = raw_x * scale
+        us.append(u)
+        if raw_x <= 0:
+            es.append(0.0)
+            continue
+
+        days_count = int(raw_x) + 1
+        cum_surplus = 0.0
+        for step in range(days_count):
+            d_str = (start_dt + timedelta(days=step)).strftime("%Y-%m-%d")
+            cum_surplus += daily_surplus_by_day.get(d_str, fallback_daily_surplus)
+        avg_surplus_to_date = cum_surplus / days_count
+        es.append(avg_surplus_to_date * u)
+
+    n = len(us)
+    mean_u = sum(us) / n
+    mean_e = sum(es) / n
+    denom = sum((u - mean_u) ** 2 for u in us)
+    if denom <= 0:
+        return fallback_daily_surplus
+
+    return sum((u - mean_u) * (e - mean_e) for u, e in zip(us, es, strict=True)) / denom
 
 
 def build_maintenance_calibration(
@@ -156,7 +226,7 @@ def build_maintenance_calibration(
     ref_date: datetime | None = None,
     min_weigh_ins: int = MIN_CALIBRATION_WEIGH_INS,
 ) -> dict[str, object]:
-    """Compute calibrated maintenance for the window based on scale change and food logs."""
+    """Compute calibrated maintenance using OLS weight slope and cumulative energy balance."""
     if not (start_day and end_day):
         start_day, end_day = _window(days, ref_date)
 
@@ -164,12 +234,7 @@ def build_maintenance_calibration(
     logged_days = [day for day in summaries if day["has_food"]]
 
     weights = get_weight_logs_between_days(conn, start_day, end_day)
-    weights.sort(key=lambda log: log.logged_at)
-
-    by_day: dict[str, float] = {}
-    for log in weights:
-        by_day[local_date(log.logged_at)] = log.weight_kg
-    daily_weights = sorted(by_day.items(), key=lambda item: item[0])
+    daily_weights = _daily_weights_from_logs(weights)
 
     calorie_offset = get_calorie_offset(conn)
     span_days = max(len(summaries), 1)
@@ -185,42 +250,56 @@ def build_maintenance_calibration(
             "start_date": start_day,
             "end_date": end_day,
             "span_days": span_days,
+            "weigh_in_span_days": None,
             "logged_days": len(logged_days),
             "trend_start_kg": None,
             "trend_end_kg": None,
             "delta_kg": None,
+            "slope_kg_per_day": None,
+            "slope_kg_per_week": None,
             "current_maintenance_kcal": None,
             "recommended_maintenance_kcal": None,
             "recommended_delta_kcal": None,
             "calorie_offset_kcal": calorie_offset,
         }
 
-    if len(daily_weights) >= 3:
-        trend_start_kg, trend_end_kg, delta_kg = _regression_weight_change(daily_weights)
-    else:
-        trend_start_kg = round(daily_weights[0][1], 2)
-        trend_end_kg = round(daily_weights[-1][1], 2)
-        delta_kg = round(trend_end_kg - trend_start_kg, 2)
+    (
+        trend_start_kg,
+        trend_end_kg,
+        delta_kg,
+        slope_kg_per_day,
+        weigh_in_span_days,
+    ) = _regression_weight_change(daily_weights)
 
     _, _, weight_kg = get_user_profile(conn)
     intake_kcal = 0.0
     maintenance_kcal = 0.0
+    daily_surplus_by_day: dict[str, float] = {}
     for day in logged_days:
-        intake_kcal += day["calories"]
+        day_intake = float(day["calories"])
         maintenance = calculate_daily_targets(
             weight_kg,
             DietGoal.MAINTENANCE,
             DayType(day["day_type"]),
             calorie_offset=calorie_offset,
         )
+        intake_kcal += day_intake
         maintenance_kcal += maintenance.calories
+        daily_surplus_by_day[str(day["date"])] = day_intake - maintenance.calories
 
     avg_intake_kcal = intake_kcal / len(logged_days)
     avg_maintenance_kcal = maintenance_kcal / len(logged_days)
-    tissue_kcal = energy_for_mass_change(delta_kg)
-    daily_tissue_kcal = tissue_kcal / span_days
-    recommended_maintenance_kcal = round(avg_intake_kcal - daily_tissue_kcal, 0)
-    recommended_delta_kcal = round(recommended_maintenance_kcal - avg_maintenance_kcal, 0)
+    avg_surplus_kcal = avg_intake_kcal - avg_maintenance_kcal
+
+    effective_daily_surplus = _cumulative_surplus_slope(
+        daily_weights,
+        daily_surplus_by_day,
+        fallback_daily_surplus=avg_surplus_kcal,
+    )
+    daily_tissue_kcal = energy_for_mass_change(slope_kg_per_day)
+    raw_delta_kcal = effective_daily_surplus - daily_tissue_kcal
+    recommended_maintenance_kcal = round(avg_maintenance_kcal + raw_delta_kcal, 0)
+    recommended_delta_kcal = round(recommended_maintenance_kcal - round(avg_maintenance_kcal, 0), 0)
 
     return {
         "ready": True,
@@ -229,10 +308,13 @@ def build_maintenance_calibration(
         "start_date": start_day,
         "end_date": end_day,
         "span_days": span_days,
+        "weigh_in_span_days": weigh_in_span_days,
         "logged_days": len(logged_days),
         "trend_start_kg": trend_start_kg,
         "trend_end_kg": trend_end_kg,
         "delta_kg": delta_kg,
+        "slope_kg_per_day": round(slope_kg_per_day, 4),
+        "slope_kg_per_week": round(slope_kg_per_day * 7.0, 2),
         "avg_intake_kcal": round(avg_intake_kcal, 0),
         "current_maintenance_kcal": round(avg_maintenance_kcal, 0),
         "recommended_maintenance_kcal": recommended_maintenance_kcal,
@@ -364,13 +446,17 @@ def build_balance_verdict(
 
     weights = get_weight_logs_between_days(conn, start_day, end_day)
     weights.sort(key=lambda log: log.logged_at)
-    first_weight = weights[0].weight_kg if weights else None
-    last_weight = weights[-1].weight_kg if len(weights) >= 2 else None
-    measured_change = (
-        round(last_weight - first_weight, 2)
-        if first_weight is not None and last_weight is not None
-        else None
-    )
+    daily_weights = _daily_weights_from_logs(weights)
+    if len(daily_weights) >= 2:
+        first_weight, last_weight, measured_change, _, _ = _regression_weight_change(daily_weights)
+    else:
+        first_weight = weights[0].weight_kg if weights else None
+        last_weight = weights[-1].weight_kg if len(weights) >= 2 else None
+        measured_change = (
+            round(last_weight - first_weight, 2)
+            if first_weight is not None and last_weight is not None
+            else None
+        )
     deviation = (
         round(measured_change - estimate.kilograms, 2) if measured_change is not None else None
     )
