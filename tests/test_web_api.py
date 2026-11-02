@@ -213,7 +213,7 @@ def test_api_balance_endpoint_reports_the_finished_window(api_client: TestClient
 
 
 def test_dashboard_shows_the_maintenance_balance(api_client: TestClient):
-    """The balance drawer carries the numbers the endpoint produces and toggles from the week card corner.
+    """The balance drawer carries the numbers and toggles from the week card corner.
 
     This is a proxy check: it reads the template rather than running a browser.
     """

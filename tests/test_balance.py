@@ -17,9 +17,14 @@ from nutrition_agent.balance import (
     estimate_mass_change,
 )
 from nutrition_agent.db import SCHEMA_SQL, get_connection
-from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog
+from nutrition_agent.models import CalculatedFoodLog, CalculatedWeightLog, CalculatedWorkoutLog
 from nutrition_agent.reporting import format_balance_report
-from nutrition_agent.repository import get_calorie_offset, save_food_logs, save_weight_log
+from nutrition_agent.repository import (
+    get_calorie_offset,
+    save_food_logs,
+    save_weight_log,
+    save_workout_log,
+)
 
 
 def test_energy_per_kg_of_gain_mixes_lean_and_fat():
@@ -180,20 +185,20 @@ def test_balance_report_is_honest_about_the_model():
     assert "Je to odhad, ne měření" in report
 
 
-def test_maintenance_calibration_requires_seven_weigh_ins_and_shifts_targets():
-    """Calibration waits for 7 weigh-ins, computes the new baseline, and shifts all targets."""
+def test_maintenance_calibration_requires_weigh_ins_and_shifts_targets():
+    """Calibration computes the new baseline and shifts all targets."""
     from nutrition_agent.targets import DayType, DietGoal, calculate_daily_targets
 
-    conn_short = _seeded(days_logged=10, kcal=2900.0, weights=[82.0, 82.0, 82.0])
-    cal_short = build_maintenance_calibration(conn_short)
+    conn_short = _seeded(days_logged=10, kcal=2900.0, weights=[82.0])
+    cal_short = build_maintenance_calibration(conn_short, days=10)
     assert cal_short["ready"] is False
-    assert cal_short["weigh_ins_count"] == 3
-    assert cal_short["required_weigh_ins"] == 7
+    assert cal_short["weigh_ins_count"] == 1
+    assert cal_short["required_weigh_ins"] == 2
 
     # 7 weigh-ins across 7 days with flat scale weight (83.0 kg) while eating 2975 kcal/day
     # (+500 kcal/day above the 2475 kcal rest maintenance for 83 kg).
     conn = _seeded(days_logged=7, kcal=2975.0, weights=[83.0] * 7)
-    cal = build_maintenance_calibration(conn)
+    cal = build_maintenance_calibration(conn, days=7)
     assert cal["ready"] is True
     assert cal["weigh_ins_count"] == 7
     assert cal["delta_kg"] == 0.0
@@ -201,7 +206,7 @@ def test_maintenance_calibration_requires_seven_weigh_ins_and_shifts_targets():
     assert cal["recommended_delta_kcal"] == 500.0
     assert cal["recommended_maintenance_kcal"] == 2975.0
 
-    applied = apply_maintenance_calibration(conn)
+    applied = apply_maintenance_calibration(conn, days=7)
     assert applied["applied"] is True
     assert applied["applied_delta_kcal"] == 500.0
     assert get_calorie_offset(conn) == 500.0
@@ -209,6 +214,82 @@ def test_maintenance_calibration_requires_seven_weigh_ins_and_shifts_targets():
 
     # All derived targets (MAINTENANCE, LEAN_BULK, CUT) shift by the calibrated offset.
     offset = get_calorie_offset(conn)
-    assert calculate_daily_targets(83.0, DietGoal.MAINTENANCE, DayType.REST, offset).calories == 2975.0
-    assert calculate_daily_targets(83.0, DietGoal.LEAN_BULK, DayType.REST, offset).calories == 3350.0
-    assert calculate_daily_targets(83.0, DietGoal.CUT, DayType.REST, offset).calories == 2650.0
+    maint = calculate_daily_targets(83.0, DietGoal.MAINTENANCE, DayType.REST, offset)
+    bulk = calculate_daily_targets(83.0, DietGoal.LEAN_BULK, DayType.REST, offset)
+    cut = calculate_daily_targets(83.0, DietGoal.CUT, DayType.REST, offset)
+    assert maint.calories == 2975.0
+    assert bulk.calories == 3350.0
+    assert cut.calories == 2650.0
+
+
+def test_maintenance_calibration_with_measured_gain_calculates_correct_maintenance():
+    """A gain of 1.2 kg on ~353 kcal/day surplus sets maintenance to ~2668 kcal/day (+80 kcal)."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    ref = datetime(2026, 11, 2)
+    for i in range(30):
+        d = (ref - timedelta(days=30 - i)).strftime("%Y-%m-%d")
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{d}T12:00:00+00:00",
+                    raw_input="food",
+                    food_name_matched="food",
+                    amount_g=100.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=2941.5,
+                    protein_raw=150.0,
+                    protein_usable=150.0,
+                    carbs=300.0,
+                    fats=80.0,
+                )
+            ],
+        )
+        # 12 training days so average baseline maintenance matches 77 644 / 30 = 2588 kcal/day
+        if i % 5 in (0, 2):
+            save_workout_log(
+                conn,
+                CalculatedWorkoutLog(
+                    logged_at=f"{d}T18:00:00+00:00",
+                    raw_input="trenink",
+                    workout_type="Silový trénink",
+                    duration_minutes=60,
+                ),
+            )
+
+    start_day = (ref - timedelta(days=30)).strftime("%Y-%m-%d")
+    end_day = (ref - timedelta(days=1)).strftime("%Y-%m-%d")
+    save_weight_log(
+        conn,
+        CalculatedWeightLog(
+            logged_at=f"{start_day}T07:00:00+00:00",
+            raw_input="81.9 kg",
+            weight_kg=81.9,
+        ),
+    )
+    save_weight_log(
+        conn,
+        CalculatedWeightLog(
+            logged_at=f"{end_day}T07:00:00+00:00",
+            raw_input="83.1 kg",
+            weight_kg=83.1,
+        ),
+    )
+
+    verdict = build_balance_verdict(conn, days=30, ref_date=ref)
+    assert verdict["measured_kg"] == 1.2
+    assert verdict["maintenance_kcal"] == 77644.0
+    cal = verdict["calibration"]
+    assert cal["ready"] is True
+    assert cal["delta_kg"] == 1.2
+    assert cal["current_maintenance_kcal"] == 2588.0
+    assert cal["recommended_maintenance_kcal"] == 2668.0
+    assert cal["recommended_delta_kcal"] == 80.0
+
+    applied = apply_maintenance_calibration(conn, days=30, ref_date=ref)
+    assert applied["applied"] is True
+    assert applied["applied_delta_kcal"] == 80.0
+    assert get_calorie_offset(conn) == 80.0

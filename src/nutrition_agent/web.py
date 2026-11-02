@@ -243,7 +243,9 @@ def create_app() -> FastAPI:
     @app.get("/api/balance")
     async def api_balance(
         days: int = Query(30, ge=1, le=365),
-        end_date: str = Query("", description="Poslední den okna (YYYY-MM-DD), prázdné = automaticky"),
+        end_date: str = Query(
+            "", description="Poslední den okna (YYYY-MM-DD), prázdné = automaticky"
+        ),
     ):
         """Energy balance against maintenance and the mass it explains."""
         ref_date = None
@@ -258,12 +260,23 @@ def create_app() -> FastAPI:
             conn.close()
 
     @app.post("/api/balance/calibrate")
-    async def api_calibrate_balance():
-        """Apply calibrated maintenance baseline from the last 7 weigh-ins."""
+    async def api_calibrate_balance(
+        days: int = Query(30, ge=1, le=365),
+        end_date: str = Query(
+            "", description="Poslední den okna (YYYY-MM-DD), prázdné = automaticky"
+        ),
+    ):
+        """Apply calibrated maintenance baseline for the active balance window."""
+        ref_date = None
+        if end_date.strip():
+            from datetime import datetime, timedelta
+
+            day = _parse_day_or_422(end_date)
+            ref_date = datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)
         conn = get_connection(settings.database_path)
         try:
             try:
-                return apply_maintenance_calibration(conn)
+                return apply_maintenance_calibration(conn, days=days, ref_date=ref_date)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:

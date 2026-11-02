@@ -1084,7 +1084,7 @@
             <div class="kpi-subtext" id="balanceMeasured">--</div>
           </div>
           <div>
-            <div class="kpi-label">Nový maintenance (7 vážení)</div>
+            <div class="kpi-label">Nový maintenance</div>
             <div class="kpi-subtext">
               <span id="balanceCalibration">--</span>
               <button type="button" class="balance-btn" id="btnAcceptCalibration" onclick="acceptCalibration()" style="display: none; margin-left: 6px; padding: 2px 8px;">Přijmout</button>
@@ -1341,7 +1341,13 @@
       const btn = document.getElementById('btnAcceptCalibration');
       if (btn) btn.disabled = true;
       try {
-        const res = await fetch('/api/balance/calibrate', { method: 'POST' });
+        let query = '?days=30';
+        if (currentBalancePeriod === 'month') {
+          query = '?end_date=2026-09-30&days=30';
+        } else if (currentBalancePeriod === 'current') {
+          query = `?end_date=${todayIso()}&days=30`;
+        }
+        const res = await fetch(`/api/balance/calibrate${query}`, { method: 'POST' });
         if (!res.ok) {
           throw new Error(await describeApiError(res));
         }

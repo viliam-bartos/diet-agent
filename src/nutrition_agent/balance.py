@@ -35,11 +35,17 @@ MAX_LEAN_GAIN_KG_PER_30_DAYS: float = 0.50
 # Losses come mostly from fat, so a deficit is converted with the adipose energy density.
 LOSS_KCAL_PER_KG: float = FAT_KCAL_PER_KG
 
+# Tissue energy density for weight gain during calibration:
+# In resistance-trained individuals, mixed tissue gain (muscle, fat, glycogen, bound water,
+# expanded blood volume) carries ~6500 to 7200 kcal/kg (approx 6850 kcal/kg, meaning ~8200 kcal
+# per 1.20 kg gained).
+GAIN_KCAL_PER_KG: float = 6850.0
+
 # Below this share of logged days the balance is a guess, not a measurement.
 MIN_LOGGED_SHARE: float = 0.70
 
-# Minimum distinct-day weigh-ins required to calibrate the maintenance baseline.
-MIN_CALIBRATION_WEIGH_INS: int = 7
+# Minimum weigh-ins required in a period to calibrate the maintenance baseline.
+MIN_CALIBRATION_WEIGH_INS: int = 2
 
 
 @dataclass(frozen=True)
@@ -109,21 +115,11 @@ def estimate_mass_change(energy_balance_kcal: float, days: int = 30) -> MassEsti
     )
 
 
-def energy_for_mass_change(delta_kg: float, days: int = 30) -> float:
+def energy_for_mass_change(delta_kg: float) -> float:
     """Return the tissue energy (kcal) represented by a measured scale change."""
     if delta_kg < 0:
         return delta_kg * LOSS_KCAL_PER_KG
-
-    effective_days = max(days, 1)
-    max_lean_kg = MAX_LEAN_GAIN_KG_PER_30_DAYS * (effective_days / 30.0)
-    max_mixed_kg = 2.0 * max_lean_kg
-    base_kcal_per_kg = energy_per_kg_of_gain()
-
-    if delta_kg <= max_mixed_kg:
-        return delta_kg * base_kcal_per_kg
-
-    cap_kcal = max_mixed_kg * base_kcal_per_kg
-    return cap_kcal + (delta_kg - max_mixed_kg) * FAT_KCAL_PER_KG
+    return delta_kg * GAIN_KCAL_PER_KG
 
 
 def _regression_weight_change(
@@ -154,54 +150,42 @@ def _regression_weight_change(
 
 def build_maintenance_calibration(
     conn,
+    start_day: str | None = None,
+    end_day: str | None = None,
+    days: int = 30,
+    ref_date: datetime | None = None,
     min_weigh_ins: int = MIN_CALIBRATION_WEIGH_INS,
 ) -> dict[str, object]:
-    """Compute a calibrated maintenance baseline from the last `min_weigh_ins` weigh-ins.
+    """Compute calibrated maintenance for the window based on scale change and food logs."""
+    if not (start_day and end_day):
+        start_day, end_day = _window(days, ref_date)
 
-    Uses the span from the first to the last of those weigh-ins, smooths weight change
-    across all weigh-ins via linear regression, and compares the observed tissue energy
-    against the logged calorie surplus/deficit over that same span.
-    """
-    all_logs = get_weight_logs_in_range(conn)
+    summaries = get_day_summaries(conn, start_day, end_day)
+    logged_days = [day for day in summaries if day["has_food"]]
+
+    weights = get_weight_logs_between_days(conn, start_day, end_day)
+    weights.sort(key=lambda log: log.logged_at)
+
     by_day: dict[str, float] = {}
-    for log in all_logs:
+    for log in weights:
         by_day[local_date(log.logged_at)] = log.weight_kg
     daily_weights = sorted(by_day.items(), key=lambda item: item[0])
 
     calorie_offset = get_calorie_offset(conn)
-    if len(daily_weights) < min_weigh_ins:
+    span_days = max(len(summaries), 1)
+
+    all_weights_count = len({local_date(log.logged_at) for log in get_weight_logs_in_range(conn)})
+    weigh_ins_count = len(daily_weights) or all_weights_count
+
+    if len(daily_weights) < min_weigh_ins or not logged_days:
         return {
             "ready": False,
-            "weigh_ins_count": len(daily_weights),
-            "required_weigh_ins": min_weigh_ins,
-            "start_date": daily_weights[0][0] if daily_weights else None,
-            "end_date": daily_weights[-1][0] if daily_weights else None,
-            "span_days": 0,
-            "logged_days": 0,
-            "trend_start_kg": None,
-            "trend_end_kg": None,
-            "delta_kg": None,
-            "current_maintenance_kcal": None,
-            "recommended_maintenance_kcal": None,
-            "recommended_delta_kcal": None,
-            "calorie_offset_kcal": calorie_offset,
-        }
-
-    window_weights = daily_weights[-min_weigh_ins:]
-    start_day = window_weights[0][0]
-    end_day = window_weights[-1][0]
-
-    summaries = get_day_summaries(conn, start_day, end_day)
-    logged_days = [day for day in summaries if day["has_food"]]
-    if not logged_days:
-        return {
-            "ready": False,
-            "weigh_ins_count": len(window_weights),
+            "weigh_ins_count": weigh_ins_count,
             "required_weigh_ins": min_weigh_ins,
             "start_date": start_day,
             "end_date": end_day,
-            "span_days": len(summaries),
-            "logged_days": 0,
+            "span_days": span_days,
+            "logged_days": len(logged_days),
             "trend_start_kg": None,
             "trend_end_kg": None,
             "delta_kg": None,
@@ -210,6 +194,13 @@ def build_maintenance_calibration(
             "recommended_delta_kcal": None,
             "calorie_offset_kcal": calorie_offset,
         }
+
+    if len(daily_weights) >= 3:
+        trend_start_kg, trend_end_kg, delta_kg = _regression_weight_change(daily_weights)
+    else:
+        trend_start_kg = round(daily_weights[0][1], 2)
+        trend_end_kg = round(daily_weights[-1][1], 2)
+        delta_kg = round(trend_end_kg - trend_start_kg, 2)
 
     _, _, weight_kg = get_user_profile(conn)
     intake_kcal = 0.0
@@ -224,19 +215,16 @@ def build_maintenance_calibration(
         )
         maintenance_kcal += maintenance.calories
 
-    trend_start_kg, trend_end_kg, delta_kg = _regression_weight_change(window_weights)
-    span_days = max(len(summaries), 1)
-    tissue_kcal = energy_for_mass_change(delta_kg, days=span_days)
-
+    avg_intake_kcal = intake_kcal / len(logged_days)
     avg_maintenance_kcal = maintenance_kcal / len(logged_days)
-    daily_logged_balance = (intake_kcal - maintenance_kcal) / len(logged_days)
+    tissue_kcal = energy_for_mass_change(delta_kg)
     daily_tissue_kcal = tissue_kcal / span_days
-    recommended_delta_kcal = round(daily_logged_balance - daily_tissue_kcal, 0)
-    recommended_maintenance_kcal = round(avg_maintenance_kcal + recommended_delta_kcal, 0)
+    recommended_maintenance_kcal = round(avg_intake_kcal - daily_tissue_kcal, 0)
+    recommended_delta_kcal = round(recommended_maintenance_kcal - avg_maintenance_kcal, 0)
 
     return {
         "ready": True,
-        "weigh_ins_count": len(window_weights),
+        "weigh_ins_count": len(daily_weights),
         "required_weigh_ins": min_weigh_ins,
         "start_date": start_day,
         "end_date": end_day,
@@ -245,6 +233,7 @@ def build_maintenance_calibration(
         "trend_start_kg": trend_start_kg,
         "trend_end_kg": trend_end_kg,
         "delta_kg": delta_kg,
+        "avg_intake_kcal": round(avg_intake_kcal, 0),
         "current_maintenance_kcal": round(avg_maintenance_kcal, 0),
         "recommended_maintenance_kcal": recommended_maintenance_kcal,
         "recommended_delta_kcal": recommended_delta_kcal,
@@ -254,14 +243,25 @@ def build_maintenance_calibration(
 
 def apply_maintenance_calibration(
     conn,
+    start_day: str | None = None,
+    end_day: str | None = None,
+    days: int = 30,
+    ref_date: datetime | None = None,
     min_weigh_ins: int = MIN_CALIBRATION_WEIGH_INS,
 ) -> dict[str, object]:
     """Persist the calibrated maintenance offset and shift all goal targets accordingly."""
-    calibration = build_maintenance_calibration(conn, min_weigh_ins=min_weigh_ins)
+    calibration = build_maintenance_calibration(
+        conn,
+        start_day=start_day,
+        end_day=end_day,
+        days=days,
+        ref_date=ref_date,
+        min_weigh_ins=min_weigh_ins,
+    )
     if not calibration["ready"]:
         raise ValueError(
-            f"Pro kalibraci maintenance je potřeba alespoň {min_weigh_ins} vážení "
-            f"(aktuálně {calibration['weigh_ins_count']}) a záznamy jídla v daném období."
+            f"Pro kalibraci maintenance je potřeba alespoň {min_weigh_ins} vážení v daném období "
+            f"(aktuálně {calibration['weigh_ins_count']}) a záznamy jídla."
         )
 
     current_offset = get_calorie_offset(conn)
@@ -291,7 +291,14 @@ def apply_maintenance_calibration(
         "active_goal": goal.value,
         "active_day_type": day_type.value,
         "active_target_calories": active_targets.calories,
-        "calibration": build_maintenance_calibration(conn, min_weigh_ins=min_weigh_ins),
+        "calibration": build_maintenance_calibration(
+            conn,
+            start_day=start_day,
+            end_day=end_day,
+            days=days,
+            ref_date=ref_date,
+            min_weigh_ins=min_weigh_ins,
+        ),
     }
 
 
@@ -428,5 +435,9 @@ def build_balance_verdict(
         "deviation_note": deviation_note,
         "warnings": warnings,
         "today": local_date(utc_now_iso()),
-        "calibration": build_maintenance_calibration(conn),
+        "calibration": build_maintenance_calibration(
+            conn,
+            start_day=start_day,
+            end_day=end_day,
+        ),
     }
