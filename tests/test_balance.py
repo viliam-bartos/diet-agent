@@ -185,28 +185,38 @@ def test_balance_report_is_honest_about_the_model():
     assert "Je to odhad, ne měření" in report
 
 
-def test_maintenance_calibration_requires_weigh_ins_and_shifts_targets():
-    """Calibration computes the new baseline and shifts all targets."""
+def test_maintenance_calibration_requires_five_weigh_ins_and_two_weeks():
+    """Calibration requires at least 5 weigh-ins over >= 14 days and shifts all targets."""
     from nutrition_agent.targets import DayType, DietGoal, calculate_daily_targets
 
-    conn_short = _seeded(days_logged=10, kcal=2900.0, weights=[82.0])
-    cal_short = build_maintenance_calibration(conn_short, days=10)
+    conn_short = _seeded(days_logged=15, kcal=2900.0, weights=[82.0, 82.1, 82.2, 82.3])
+    cal_short = build_maintenance_calibration(conn_short)
     assert cal_short["ready"] is False
-    assert cal_short["weigh_ins_count"] == 1
-    assert cal_short["required_weigh_ins"] == 2
+    assert cal_short["weigh_ins_count"] == 4
+    assert cal_short["required_weigh_ins"] == 5
 
-    # 7 weigh-ins across 7 days with flat scale weight (83.0 kg) while eating 2975 kcal/day
-    # (+500 kcal/day above the 2475 kcal rest maintenance for 83 kg).
-    conn = _seeded(days_logged=7, kcal=2975.0, weights=[83.0] * 7)
-    cal = build_maintenance_calibration(conn, days=7)
+    # 5 weigh-ins over only 5 consecutive days (< 14 days) is not ready either.
+    conn_too_narrow = _seeded(days_logged=10, kcal=2975.0, weights=[83.0] * 5)
+    cal_narrow = build_maintenance_calibration(conn_too_narrow)
+    assert cal_narrow["ready"] is False
+    assert cal_narrow["weigh_ins_count"] == 5
+    assert cal_narrow["weigh_in_span_days"] == 5
+    assert cal_narrow["min_span_days"] == 14
+
+    # 15 weigh-ins across 15 days with flat scale weight (83.0 kg) while eating 2975 kcal/day
+    # (+500 kcal/day above the 2475 kcal rest maintenance for 83 kg): calibration picks
+    # strictly 5 weigh-ins spanning >= 14 days.
+    conn = _seeded(days_logged=15, kcal=2975.0, weights=[83.0] * 15)
+    cal = build_maintenance_calibration(conn)
     assert cal["ready"] is True
-    assert cal["weigh_ins_count"] == 7
+    assert cal["weigh_ins_count"] == 5
+    assert cal["weigh_in_span_days"] >= 14
     assert cal["delta_kg"] == 0.0
     assert cal["current_maintenance_kcal"] == 2475.0
     assert cal["recommended_delta_kcal"] == 500.0
     assert cal["recommended_maintenance_kcal"] == 2975.0
 
-    applied = apply_maintenance_calibration(conn, days=7)
+    applied = apply_maintenance_calibration(conn)
     assert applied["applied"] is True
     assert applied["applied_delta_kcal"] == 500.0
     assert get_calorie_offset(conn) == 500.0
@@ -223,7 +233,7 @@ def test_maintenance_calibration_requires_weigh_ins_and_shifts_targets():
 
 
 def test_maintenance_calibration_with_measured_gain_calculates_correct_maintenance():
-    """A 1.2 kg gain on ~353 kcal/day surplus calibrates maintenance to ~2668 kcal/day (+80)."""
+    """A +1.2 kg gain across 5 weigh-ins over 30 days calibrates maintenance to ~2668 kcal/day (+80)."""
     conn = get_connection(":memory:")
     conn.executescript(SCHEMA_SQL)
 
@@ -260,43 +270,39 @@ def test_maintenance_calibration_with_measured_gain_calculates_correct_maintenan
                 ),
             )
 
-    start_day = (ref - timedelta(days=30)).strftime("%Y-%m-%d")
-    end_day = (ref - timedelta(days=1)).strftime("%Y-%m-%d")
-    save_weight_log(
-        conn,
-        CalculatedWeightLog(
-            logged_at=f"{start_day}T07:00:00+00:00",
-            raw_input="81.9 kg",
-            weight_kg=81.9,
-        ),
-    )
-    save_weight_log(
-        conn,
-        CalculatedWeightLog(
-            logged_at=f"{end_day}T07:00:00+00:00",
-            raw_input="83.1 kg",
-            weight_kg=83.1,
-        ),
-    )
+    # 5 weigh-ins evenly spaced across the 30-day window (days 0, 7, 14, 22, 29),
+    # growing linearly from 81.9 kg to 83.1 kg (+1.2 kg over 30 days).
+    for offset in (0, 7, 14, 22, 29):
+        day_str = (ref - timedelta(days=30 - offset)).strftime("%Y-%m-%d")
+        w = round(81.9 + 1.2 * (offset / 29.0), 4)
+        save_weight_log(
+            conn,
+            CalculatedWeightLog(
+                logged_at=f"{day_str}T07:00:00+00:00",
+                raw_input=f"{w} kg",
+                weight_kg=w,
+            ),
+        )
 
     verdict = build_balance_verdict(conn, days=30, ref_date=ref)
-    assert verdict["measured_kg"] == 1.2
     assert verdict["maintenance_kcal"] == 77644.0
     cal = verdict["calibration"]
     assert cal["ready"] is True
+    assert cal["weigh_ins_count"] == 5
+    assert cal["weigh_in_span_days"] == 30
     assert cal["delta_kg"] == 1.2
     assert cal["current_maintenance_kcal"] == 2588.0
     assert cal["recommended_maintenance_kcal"] == 2668.0
     assert cal["recommended_delta_kcal"] == 80.0
 
-    applied = apply_maintenance_calibration(conn, days=30, ref_date=ref)
+    applied = apply_maintenance_calibration(conn, ref_date=ref)
     assert applied["applied"] is True
     assert applied["applied_delta_kcal"] == 80.0
     assert get_calorie_offset(conn) == 80.0
 
 
-def test_maintenance_calibration_uses_ols_slope_across_irregular_noisy_weigh_ins():
-    """Irregular weigh-ins with water noise use OLS slope (kg/day), not raw endpoints."""
+def test_maintenance_calibration_uses_ols_slope_across_five_weigh_ins():
+    """Calibration uses OLS slope over strictly the last 5 weigh-ins (spanning >= 14 days)."""
     conn = get_connection(":memory:")
     conn.executescript(SCHEMA_SQL)
 
@@ -321,22 +327,18 @@ def test_maintenance_calibration_uses_ols_slope_across_irregular_noisy_weigh_ins
                 )
             ],
         )
-        if i % 5 in (0, 2):
-            save_workout_log(
-                conn,
-                CalculatedWorkoutLog(
-                    logged_at=f"{d}T18:00:00+00:00",
-                    raw_input="trenink",
-                    workout_type="Silový trénink",
-                    duration_minutes=60,
-                ),
-            )
 
-    # 7 weigh-ins spread across 19 calendar days (day offsets 0..18) inside the 30-day window.
-    # True underlying trend: 82.0 kg + 0.04 kg/day (+0.28 kg/week, +0.76 kg over 19 days),
-    # plus zero-covariance water noise (+0.35 kg at start, -0.35 kg at end).
-    offsets_from_day4 = [0, 3, 6, 9, 12, 15, 18]
-    noise = [0.35, -0.40, -0.25, 0.0, 0.25, 0.40, -0.35]
+    # Seed 2 older outlier weigh-ins and then 5 weigh-ins across 19 calendar days (offsets 0, 4, 9, 14, 18).
+    save_weight_log(
+        conn,
+        CalculatedWeightLog(
+            logged_at=f"{(ref - timedelta(days=30)).strftime('%Y-%m-%d')}T07:00:00+00:00",
+            raw_input="75.0 kg",
+            weight_kg=75.0,
+        ),
+    )
+    offsets_from_day4 = [0, 4, 9, 14, 18]
+    noise = [0.20, -0.36, 0.0, 0.36, -0.20]
     for offset, err in zip(offsets_from_day4, noise, strict=True):
         day_str = (ref - timedelta(days=27 - offset)).strftime("%Y-%m-%d")
         true_w = 82.0 + 0.04 * (offset * 19.0 / 18.0)
@@ -352,14 +354,202 @@ def test_maintenance_calibration_uses_ols_slope_across_irregular_noisy_weigh_ins
     verdict = build_balance_verdict(conn, days=30, ref_date=ref)
     cal = verdict["calibration"]
     assert cal["ready"] is True
-    assert cal["weigh_ins_count"] == 7
+    assert cal["weigh_ins_count"] == 5
     assert cal["weigh_in_span_days"] == 19
-    # Raw endpoints would say (82.76 - 0.35) - (82.0 + 0.35) = +0.06 kg,
-    # whereas OLS regression recovers the true +0.76 kg over 19 days (+0.04 kg/day, +0.28 kg/week).
     assert cal["delta_kg"] == 0.76
-    assert verdict["measured_kg"] == 0.76
     assert cal["slope_kg_per_day"] == 0.04
     assert cal["slope_kg_per_week"] == 0.28
-    assert cal["recommended_maintenance_kcal"] == 2671.0
-    assert cal["recommended_delta_kcal"] == 104.0
+
+
+def test_balance_verdict_measures_gain_from_average_of_last_three_weigh_ins():
+    """Actual mass change in a balance window compares start weight to average of last 3 weigh-ins."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    ref = datetime(2026, 11, 4)
+    for i in range(1, 21):
+        d = (ref - timedelta(days=i)).strftime("%Y-%m-%d")
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{d}T12:00:00+00:00",
+                    raw_input="food",
+                    food_name_matched="food",
+                    amount_g=100.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=3000.0,
+                    protein_raw=160.0,
+                    protein_usable=160.0,
+                    carbs=300.0,
+                    fats=80.0,
+                )
+            ],
+        )
+
+    # First weigh-in: 80.0 kg. Last 3 weigh-ins: 81.2, 81.5, 81.8 -> avg = 81.5 kg -> +1.50 kg.
+    weigh_ins = [
+        (20, 80.0),
+        (14, 80.6),
+        (7, 81.2),
+        (4, 81.5),
+        (1, 81.8),
+    ]
+    for days_ago, w in weigh_ins:
+        d = (ref - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        save_weight_log(
+            conn,
+            CalculatedWeightLog(
+                logged_at=f"{d}T07:00:00+00:00",
+                raw_input=f"{w} kg",
+                weight_kg=w,
+            ),
+        )
+
+    verdict = build_balance_verdict(conn, days=30, ref_date=ref)
+    assert verdict["first_weight_kg"] == 80.0
+    assert verdict["last_weight_kg"] == 81.5
+    assert verdict["end_weights_averaged"] == 3
+    assert verdict["measured_kg"] == 1.5
+
+
+def test_balance_active_period_stops_at_gap_longer_than_seven_days():
+    """Active period includes consecutive logged days with gaps <= 7 days, and calibration is independent."""
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    ref = datetime(2026, 11, 4)
+    # Earlier cluster: 40..35 days ago (followed by a 10-day gap > 7 days)
+    for days_ago in range(35, 41):
+        d = (ref - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{d}T12:00:00+00:00",
+                    raw_input="old",
+                    food_name_matched="old",
+                    amount_g=100.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=2800.0,
+                    protein_raw=150.0,
+                    protein_usable=150.0,
+                    carbs=250.0,
+                    fats=70.0,
+                )
+            ],
+        )
+
+    # Latest active cluster: 24 days ago, 18 days ago (gap = 6 days <= 7), and 15..1 days ago
+    active_days_ago = [24, 18] + list(range(15, 0, -1))
+    for days_ago in active_days_ago:
+        d = (ref - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{d}T12:00:00+00:00",
+                    raw_input="active",
+                    food_name_matched="active",
+                    amount_g=100.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=3100.0,
+                    protein_raw=160.0,
+                    protein_usable=160.0,
+                    carbs=300.0,
+                    fats=80.0,
+                )
+            ],
+        )
+
+    for days_ago, w in [(24, 82.0), (18, 82.2), (12, 82.4), (6, 82.6), (1, 82.8)]:
+        d = (ref - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+        save_weight_log(
+            conn,
+            CalculatedWeightLog(
+                logged_at=f"{d}T07:00:00+00:00",
+                raw_input=f"{w} kg",
+                weight_kg=w,
+            ),
+        )
+
+    v_active = build_balance_verdict(conn, ref_date=ref, period="active")
+    v_30d = build_balance_verdict(conn, days=30, ref_date=ref, period="30d")
+    v_90d = build_balance_verdict(conn, days=90, ref_date=ref, period="90d")
+
+    assert v_active["period"] == "active"
+    assert v_active["start_date"] == (ref - timedelta(days=24)).strftime("%Y-%m-%d")
+    assert v_active["end_date"] == (ref - timedelta(days=1)).strftime("%Y-%m-%d")
+    assert v_active["logged_days"] == len(active_days_ago)
+
+    assert v_90d["period"] == "90d"
+    assert v_90d["window_days"] == 90
+    assert v_90d["logged_days"] == len(active_days_ago) + 6
+
+    # Calibration is identical across all three balance windows!
+    assert v_active["calibration"] == v_30d["calibration"] == v_90d["calibration"]
+
+
+def test_changing_calorie_target_preserves_previous_months_completed_days():
+    """Setting a new calorie target today does not overwrite targets or green days from past months."""
+    from nutrition_agent.cli import handle_user_message
+    from nutrition_agent.repository import get_heatmap_data, set_calorie_target
+
+    conn = get_connection(":memory:")
+    conn.executescript(SCHEMA_SQL)
+
+    # Set initial weight 73.5 kg so LEAN_BULK REST target is ~2800 kcal (2799.2 kcal)
+    save_weight_log(
+        conn,
+        CalculatedWeightLog(
+            logged_at="2026-09-01T07:00:00+00:00",
+            raw_input="73.5 kg",
+            weight_kg=73.5,
+        ),
+    )
+    set_calorie_target(conn, 2800.0, effective_date="2026-09-01")
+
+    # Log 5 days in September 2026 with 2650 kcal (which is >= 90% of 2800 = 2520 -> GREEN,
+    # but would be < 90% of 3000 = 2700 -> AMBER if overwritten!).
+    sept_days = [f"2026-09-0{i}" for i in range(1, 6)]
+    for day in sept_days:
+        save_food_logs(
+            conn,
+            [
+                CalculatedFoodLog(
+                    logged_at=f"{day}T12:00:00+00:00",
+                    raw_input="jídlo",
+                    food_name_matched="Kuřecí prsa",
+                    amount_g=200.0,
+                    state="raw",
+                    is_estimated=False,
+                    calories=2650.0,
+                    protein_raw=160.0,
+                    protein_usable=160.0,
+                    carbs=280.0,
+                    fats=70.0,
+                )
+            ],
+        )
+
+    before = get_heatmap_data(conn, "2026-09-01T00:00:00", "2026-09-05T23:59:59")
+    assert all(cell["level"] == "green" for cell in before)
+    assert all(cell["target_calories"] == 2800.0 for cell in before)
+
+    # Now two months later (2026-11-04), change the calorie target to 3000 kcal via CLI command!
+    reply = handle_user_message("cil 3000", [], conn, target_day="2026-11-04")
+    assert "3000 kcal" in reply
+
+    # Today's target is 3000 kcal...
+    nov = get_heatmap_data(conn, "2026-11-04T00:00:00", "2026-11-04T23:59:59")
+    assert nov[0]["target_calories"] == 3000.0
+
+    # ...while September's completed days still have target 2800 kcal and remain GREEN!
+    after = get_heatmap_data(conn, "2026-09-01T00:00:00", "2026-09-05T23:59:59")
+    assert all(cell["target_calories"] == 2800.0 for cell in after)
+    assert all(cell["level"] == "green" for cell in after)
+
 

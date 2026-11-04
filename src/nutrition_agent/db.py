@@ -84,6 +84,49 @@ CREATE TABLE IF NOT EXISTS unit_conversions (
     updated_at TEXT NOT NULL,
     PRIMARY KEY (food_key, unit)
 );
+
+CREATE TABLE IF NOT EXISTS target_history (
+    effective_date TEXT PRIMARY KEY,
+    goal TEXT NOT NULL,
+    calorie_offset REAL NOT NULL DEFAULT 0.0,
+    weight_kg REAL,
+    custom_calories REAL,
+    custom_protein REAL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daily_target_snapshots (
+    date TEXT PRIMARY KEY,
+    goal TEXT NOT NULL,
+    day_type TEXT NOT NULL CHECK (day_type IN ('training', 'rest')),
+    weight_kg REAL NOT NULL,
+    calorie_offset REAL NOT NULL DEFAULT 0.0,
+    target_calories REAL NOT NULL,
+    target_protein REAL NOT NULL,
+    target_protein_total REAL NOT NULL,
+    target_carbs REAL NOT NULL,
+    target_fats REAL NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS trg_food_logs_cleanup_snapshot
+AFTER DELETE ON food_logs
+WHEN NOT EXISTS (
+    SELECT 1 FROM food_logs
+    WHERE date(logged_at, 'localtime') = date(OLD.logged_at, 'localtime')
+)
+BEGIN
+    DELETE FROM daily_target_snapshots
+    WHERE date = date(OLD.logged_at, 'localtime');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_user_settings_cleanup_history
+AFTER DELETE ON user_settings
+WHEN NOT EXISTS (SELECT 1 FROM user_settings)
+BEGIN
+    DELETE FROM target_history;
+    DELETE FROM daily_target_snapshots;
+END;
 """
 
 # Kept separate so the migration can rebuild the table with the same definition.
@@ -242,6 +285,56 @@ def _drop_redundant_day_types(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_target_history(conn: sqlite3.Connection) -> None:
+    """Seed target_history for databases where a calibration offset was already saved."""
+    if not _table_exists(conn, "target_history") or not _table_exists(conn, "user_settings"):
+        return
+
+    existing_count = conn.execute("SELECT COUNT(*) FROM target_history").fetchone()[0]
+    if existing_count > 0:
+        return
+
+    offset_row = conn.execute(
+        "SELECT value, updated_at, date(updated_at, 'localtime') AS eff_date "
+        "FROM user_settings WHERE key = 'maintenance_offset_kcal'"
+    ).fetchone()
+    if offset_row is None:
+        return
+
+    try:
+        offset_val = float(offset_row["value"])
+    except (ValueError, TypeError):
+        return
+
+    if abs(offset_val) < 1e-6:
+        return
+
+    goal_row = conn.execute("SELECT value FROM user_settings WHERE key = 'goal'").fetchone()
+    goal_val = goal_row["value"] if goal_row and goal_row["value"] else "lean_bulk"
+    eff_date = offset_row["eff_date"] or "0001-01-01"
+    updated_at = offset_row["updated_at"]
+
+    conn.execute(
+        """
+        INSERT INTO target_history (effective_date, goal, calorie_offset, updated_at)
+        VALUES ('0001-01-01', ?, 0.0, ?)
+        ON CONFLICT(effective_date) DO NOTHING
+        """,
+        (goal_val, updated_at),
+    )
+    conn.execute(
+        """
+        INSERT INTO target_history (effective_date, goal, calorie_offset, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(effective_date) DO UPDATE SET
+            goal = excluded.goal,
+            calorie_offset = excluded.calorie_offset,
+            updated_at = excluded.updated_at
+        """,
+        (eff_date, goal_val, offset_val, updated_at),
+    )
+
+
 def init_db(db_path: str | Path) -> None:
     """Initialize SQLite tables, indices and pending migrations."""
     with get_connection(db_path) as conn:
@@ -250,3 +343,4 @@ def init_db(db_path: str | Path) -> None:
         _apply_column_migrations(conn)
         _migrate_stored_day_type(conn)
         _drop_redundant_day_types(conn)
+        _migrate_target_history(conn)

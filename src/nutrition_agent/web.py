@@ -208,15 +208,21 @@ def create_app() -> FastAPI:
             goal, _, weight = get_user_profile(conn)
             detail["goal"] = goal.value
             detail["weight_kg"] = weight
+            has_snapshot = (
+                conn.execute(
+                    "SELECT 1 FROM daily_target_snapshots WHERE date = ?", (day,)
+                ).fetchone()
+                is not None
+            )
             # A pinned target replaces the derived one, so what is still left to eat has to
             # be recomputed with it; otherwise the card would show a target it does not
-            # measure itself against.
-            if settings.target_calories:
+            # measure itself against. Past days with frozen snapshots keep their snapshot.
+            if not has_snapshot and settings.target_calories:
                 detail["target_calories"] = settings.target_calories
                 detail["remaining_calories"] = round(
                     settings.target_calories - detail["calories"], 0
                 )
-            if settings.target_protein_g:
+            if not has_snapshot and settings.target_protein_g:
                 detail["target_protein"] = settings.target_protein_g
                 detail["remaining_protein"] = round(
                     settings.target_protein_g - detail["protein_usable"], 1
@@ -243,6 +249,9 @@ def create_app() -> FastAPI:
     @app.get("/api/balance")
     async def api_balance(
         days: int = Query(30, ge=1, le=365),
+        period: str = Query(
+            "", description="Časové okno: '30d', '90d' nebo 'active'"
+        ),
         end_date: str = Query(
             "", description="Poslední den okna (YYYY-MM-DD), prázdné = automaticky"
         ),
@@ -255,7 +264,12 @@ def create_app() -> FastAPI:
             ref_date = datetime.strptime(day, "%Y-%m-%d") + timedelta(days=1)
         conn = get_connection(settings.database_path)
         try:
-            return build_balance_verdict(conn, days=days, ref_date=ref_date)
+            return build_balance_verdict(
+                conn,
+                days=days,
+                ref_date=ref_date,
+                period=period.strip() or None,
+            )
         finally:
             conn.close()
 
@@ -266,7 +280,7 @@ def create_app() -> FastAPI:
             "", description="Poslední den okna (YYYY-MM-DD), prázdné = automaticky"
         ),
     ):
-        """Apply calibrated maintenance baseline for the active balance window."""
+        """Apply calibrated maintenance baseline (from 5 weigh-ins over >= 14 days)."""
         ref_date = None
         if end_date.strip():
             from datetime import datetime, timedelta
@@ -276,7 +290,7 @@ def create_app() -> FastAPI:
         conn = get_connection(settings.database_path)
         try:
             try:
-                return apply_maintenance_calibration(conn, days=days, ref_date=ref_date)
+                return apply_maintenance_calibration(conn, ref_date=ref_date)
             except ValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:

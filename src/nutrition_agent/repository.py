@@ -509,12 +509,180 @@ def get_user_setting(
     return row["value"] if row else default
 
 
+def _has_target_tables(conn: sqlite3.Connection) -> bool:
+    """Report whether the target history and snapshot tables exist."""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master "
+        "WHERE type = 'table' AND name IN ('target_history', 'daily_target_snapshots')"
+    ).fetchone()
+    return bool(row and row[0] == 2)
+
+
+def _resolve_target_params_from_history(
+    history_rows: list[sqlite3.Row],
+    day: str,
+    default_goal: DietGoal,
+    default_offset: float,
+    default_weight: float,
+) -> tuple[DietGoal, float, float]:
+    """Resolve (goal, calorie_offset, weight_kg) active on `day` from target_history rows."""
+    if not history_rows:
+        return default_goal, default_offset, default_weight
+
+    chosen = history_rows[0]
+    for row in history_rows:
+        if str(row["effective_date"]) <= day:
+            chosen = row
+        else:
+            break
+
+    try:
+        goal = DietGoal(str(chosen["goal"]))
+    except ValueError:
+        goal = default_goal
+    offset = float(chosen["calorie_offset"] or 0.0)
+    weight = float(chosen["weight_kg"]) if chosen["weight_kg"] is not None else default_weight
+    return goal, offset, weight
+
+
+def _freeze_past_logged_days(
+    conn: sqlite3.Connection,
+    before_day: str,
+    prev_goal: DietGoal,
+    prev_offset: float,
+    prev_weight: float,
+) -> None:
+    """Snapshot targets of all food-logged days strictly before `before_day`.
+
+    Once a day is in the past and the user changes their calorie target or goal, that
+    past day's target is frozen so its calendar adherence colour is never rewritten.
+    """
+    if not _has_target_tables(conn):
+        return
+
+    history_rows = conn.execute(
+        "SELECT effective_date, goal, calorie_offset, weight_kg "
+        "FROM target_history ORDER BY effective_date ASC"
+    ).fetchall()
+
+    past_days = [
+        str(row["d"])
+        for row in conn.execute(
+            """
+            SELECT DISTINCT date(logged_at, 'localtime') AS d
+            FROM food_logs
+            WHERE date(logged_at, 'localtime') < ?
+            ORDER BY d ASC
+            """,
+            (before_day,),
+        ).fetchall()
+        if row["d"]
+    ]
+    if not past_days:
+        return
+
+    existing_snapshots = {
+        str(row["date"])
+        for row in conn.execute(
+            "SELECT date FROM daily_target_snapshots WHERE date < ?",
+            (before_day,),
+        ).fetchall()
+    }
+
+    now_iso = utc_now_iso()
+    for day in past_days:
+        if day in existing_snapshots:
+            continue
+        day_goal, day_offset, day_weight = _resolve_target_params_from_history(
+            history_rows, day, prev_goal, prev_offset, prev_weight
+        )
+        day_type = get_day_type(conn, day)
+        targets = calculate_daily_targets(
+            day_weight, day_goal, day_type, calorie_offset=day_offset
+        )
+        conn.execute(
+            """
+            INSERT INTO daily_target_snapshots (
+                date, goal, day_type, weight_kg, calorie_offset,
+                target_calories, target_protein, target_protein_total,
+                target_carbs, target_fats, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(date) DO NOTHING
+            """,
+            (
+                day,
+                day_goal.value,
+                day_type.value,
+                day_weight,
+                day_offset,
+                targets.calories,
+                targets.protein_usable,
+                targets.protein_total,
+                targets.carbs,
+                targets.fats,
+                now_iso,
+            ),
+        )
+
+
+def _record_target_change(
+    conn: sqlite3.Connection,
+    effective_date: str,
+    prev_goal: DietGoal,
+    prev_offset: float,
+    prev_weight: float,
+    new_goal: DietGoal,
+    new_offset: float,
+    new_weight: float,
+) -> None:
+    """Freeze past logged days and append the new target state to target_history."""
+    if not _has_target_tables(conn):
+        return
+
+    _freeze_past_logged_days(conn, effective_date, prev_goal, prev_offset, prev_weight)
+    now_iso = utc_now_iso()
+
+    conn.execute(
+        """
+        INSERT INTO target_history (effective_date, goal, calorie_offset, weight_kg, updated_at)
+        VALUES ('0001-01-01', ?, ?, ?, ?)
+        ON CONFLICT(effective_date) DO NOTHING
+        """,
+        (prev_goal.value, round(prev_offset, 1), prev_weight, now_iso),
+    )
+    conn.execute(
+        """
+        INSERT INTO target_history (effective_date, goal, calorie_offset, weight_kg, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(effective_date) DO UPDATE SET
+            goal = excluded.goal,
+            calorie_offset = excluded.calorie_offset,
+            weight_kg = excluded.weight_kg,
+            updated_at = excluded.updated_at
+        """,
+        (effective_date, new_goal.value, round(new_offset, 1), new_weight, now_iso),
+    )
+    # Any snapshot on or after the effective date is superseded by the new target.
+    conn.execute(
+        "DELETE FROM daily_target_snapshots WHERE date >= ?",
+        (effective_date,),
+    )
+
+
 def set_user_setting(
     conn: sqlite3.Connection,
     key: str,
     value: str,
+    effective_date: str | None = None,
 ) -> None:
-    """Persist or update user setting."""
+    """Persist or update user setting, preserving past daily targets when goal/offset changes."""
+    eff_day = effective_date or local_date(utc_now_iso())
+    track_change = key in ("goal", "maintenance_offset_kcal") and _has_target_tables(conn)
+    if track_change:
+        prev_goal, _, prev_weight = get_user_profile(conn)
+        prev_offset = get_calorie_offset(conn)
+
     sql = """
     INSERT INTO user_settings (key, value, updated_at)
     VALUES (?, ?, ?)
@@ -524,6 +692,21 @@ def set_user_setting(
     """
     cursor = conn.cursor()
     cursor.execute(sql, (key, value, utc_now_iso()))
+
+    if track_change:
+        new_goal, _, new_weight = get_user_profile(conn)
+        new_offset = get_calorie_offset(conn)
+        _record_target_change(
+            conn,
+            eff_day,
+            prev_goal,
+            prev_offset,
+            prev_weight,
+            new_goal,
+            new_offset,
+            new_weight,
+        )
+
     conn.commit()
 
 
@@ -573,9 +756,39 @@ def get_calorie_offset(conn: sqlite3.Connection) -> float:
         return 0.0
 
 
-def set_calorie_offset(conn: sqlite3.Connection, offset_kcal: float) -> None:
-    """Persist the calibrated daily calorie offset."""
-    set_user_setting(conn, "maintenance_offset_kcal", str(round(offset_kcal, 1)))
+def set_calorie_offset(
+    conn: sqlite3.Connection,
+    offset_kcal: float,
+    effective_date: str | None = None,
+) -> None:
+    """Persist the calibrated daily calorie offset while keeping past targets intact."""
+    set_user_setting(
+        conn,
+        "maintenance_offset_kcal",
+        str(round(offset_kcal, 1)),
+        effective_date=effective_date,
+    )
+
+
+def set_calorie_target(
+    conn: sqlite3.Connection,
+    target_calories: float,
+    effective_date: str | None = None,
+) -> float:
+    """Set a new daily calorie target from `effective_date` onward without altering past days.
+
+    Returns the newly persisted calorie offset.
+    """
+    if target_calories < 500 or target_calories > 15000:
+        raise ValueError("Kalorický cíl musí být v rozumném rozsahu (500 až 15000 kcal).")
+
+    eff_day = effective_date or local_date(utc_now_iso())
+    goal, _, weight_kg = get_user_profile(conn)
+    day_type = get_day_type(conn, eff_day)
+    base_targets = calculate_daily_targets(weight_kg, goal, day_type, calorie_offset=0.0)
+    new_offset = round(target_calories - base_targets.calories, 1)
+    set_calorie_offset(conn, new_offset, effective_date=eff_day)
+    return new_offset
 
 
 def get_user_profile(conn: sqlite3.Connection) -> tuple[DietGoal, DayType, float]:
@@ -1017,6 +1230,27 @@ def get_day_summaries(
         )
     }
 
+    snapshots: dict[str, sqlite3.Row] = {}
+    history_rows: list[sqlite3.Row] = []
+    if _has_target_tables(conn):
+        snapshots = {
+            str(row["date"]): row
+            for row in conn.execute(
+                """
+                SELECT date, goal, day_type, weight_kg, calorie_offset,
+                       target_calories, target_protein, target_protein_total,
+                       target_carbs, target_fats
+                FROM daily_target_snapshots
+                WHERE date BETWEEN ? AND ?
+                """,
+                (start_day, end_day),
+            ).fetchall()
+        }
+        history_rows = conn.execute(
+            "SELECT effective_date, goal, calorie_offset, weight_kg "
+            "FROM target_history ORDER BY effective_date ASC"
+        ).fetchall()
+
     summaries: list[dict[str, object]] = []
 
     today_str = local_date(utc_now_iso())
@@ -1038,9 +1272,52 @@ def get_day_summaries(
         else:
             day_type = DayType.REST
 
-        targets = calculate_daily_targets(
-            weight, goal, day_type, calorie_offset=calorie_offset
-        )
+        snap = snapshots.get(day)
+        if snap is not None:
+            if str(snap["day_type"]) == day_type.value:
+                target_calories = float(snap["target_calories"])
+                target_protein = float(snap["target_protein"])
+                target_protein_total = float(snap["target_protein_total"])
+                target_carbs = float(snap["target_carbs"])
+                target_fats = float(snap["target_fats"])
+            else:
+                try:
+                    snap_goal = DietGoal(str(snap["goal"]))
+                except ValueError:
+                    snap_goal = goal
+                recomputed = calculate_daily_targets(
+                    float(snap["weight_kg"]),
+                    snap_goal,
+                    day_type,
+                    calorie_offset=float(snap["calorie_offset"] or 0.0),
+                )
+                target_calories = recomputed.calories
+                target_protein = recomputed.protein_usable
+                target_protein_total = recomputed.protein_total
+                target_carbs = recomputed.carbs
+                target_fats = recomputed.fats
+        elif history_rows:
+            day_goal, day_offset, day_weight = _resolve_target_params_from_history(
+                history_rows, day, goal, calorie_offset, weight
+            )
+            targets = calculate_daily_targets(
+                day_weight, day_goal, day_type, calorie_offset=day_offset
+            )
+            target_calories = targets.calories
+            target_protein = targets.protein_usable
+            target_protein_total = targets.protein_total
+            target_carbs = targets.carbs
+            target_fats = targets.fats
+        else:
+            targets = calculate_daily_targets(
+                weight, goal, day_type, calorie_offset=calorie_offset
+            )
+            target_calories = targets.calories
+            target_protein = targets.protein_usable
+            target_protein_total = targets.protein_total
+            target_carbs = targets.carbs
+            target_fats = targets.fats
+
         calories = daily_calories.get(day, 0.0)
 
         summaries.append(
@@ -1052,11 +1329,11 @@ def get_day_summaries(
                 "protein_total": round(daily_protein_total.get(day, 0.0), 1),
                 "carbs": round(daily_carbs.get(day, 0.0), 1),
                 "fats": round(daily_fats.get(day, 0.0), 1),
-                "target_calories": targets.calories,
-                "target_protein": targets.protein_usable,
-                "target_protein_total": targets.protein_total,
-                "target_carbs": targets.carbs,
-                "target_fats": targets.fats,
+                "target_calories": target_calories,
+                "target_protein": target_protein,
+                "target_protein_total": target_protein_total,
+                "target_carbs": target_carbs,
+                "target_fats": target_fats,
                 "day_type": day_type.value,
                 "has_workout": workout is not None,
                 "workout_type": workout.workout_type if workout else None,

@@ -936,27 +936,237 @@
       padding: 10px 0;
     }
 
-    /* Balance buttons */
+    /* Balance buttons & redesigned drawer */
+    .balance-header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+      padding-bottom: 14px;
+      border-bottom: var(--border-subtle);
+    }
+
+    .balance-title-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .balance-period-pill {
+      display: inline-block;
+      padding: 2px 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      background: var(--bg-cardboard);
+      border: 1px solid rgba(24, 24, 26, 0.35);
+      color: var(--ink-primary);
+    }
+
     .balance-btn-group {
       display: flex;
       gap: 6px;
       margin-top: 10px;
-      margin-bottom: 4px;
       flex-wrap: wrap;
     }
 
     .balance-btn {
-      padding: 4px 10px;
-      font-size: 12px;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 700;
       font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
       background: var(--bg-cardboard);
-      border: var(--border-subtle);
+      border: 1px solid rgba(24, 24, 26, 0.35);
+      color: var(--ink-primary);
       cursor: pointer;
+      transition: all 0.12s ease;
+    }
+
+    .balance-btn:hover {
+      border-color: var(--ink-primary);
+      background: var(--bg-cardboard-dark);
     }
 
     .balance-btn.active {
       background: var(--ink-primary);
       color: var(--bg-paper);
+      border-color: var(--ink-primary);
+      box-shadow: 2px 2px 0px var(--valve-orange);
+    }
+
+    .balance-hero-box {
+      text-align: right;
+      background: var(--bg-paper);
+      border: 1px solid rgba(24, 24, 26, 0.3);
+      padding: 8px 14px;
+      min-width: 170px;
+    }
+
+    .balance-hero-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--ink-secondary);
+      margin-bottom: 2px;
+    }
+
+    .balance-hero-value {
+      font-size: 28px;
+      font-weight: 700;
+      line-height: 1.1;
+    }
+
+    .balance-hero-sub {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--ink-secondary);
+      margin-top: 3px;
+    }
+
+    .balance-stat-card {
+      background: var(--bg-paper);
+      border: 1px solid rgba(24, 24, 26, 0.28);
+      border-top: 3px solid var(--ink-primary);
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .balance-stat-card.accent-energy {
+      border-top-color: var(--valve-orange);
+    }
+
+    .balance-stat-card.accent-theory {
+      border-top-color: #2B6CB0;
+    }
+
+    .balance-stat-card.accent-scale {
+      border-top-color: #2F855A;
+    }
+
+    .balance-stat-value {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--ink-primary);
+      line-height: 1.15;
+    }
+
+    .balance-stat-value.pos {
+      color: var(--valve-orange);
+    }
+
+    .balance-stat-value.neg {
+      color: var(--aperture-cyan);
+    }
+
+    .balance-stat-detail {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--ink-primary);
+      line-height: 1.55;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .balance-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid rgba(24, 24, 26, 0.25);
+      background: var(--bg-sheet);
+      color: var(--ink-primary);
+    }
+
+    .balance-chip.chip-muscle {
+      background: #E6FFFA;
+      border-color: #2C7A7B;
+      color: #234E52;
+    }
+
+    .balance-chip.chip-fat {
+      background: #FEEBC8;
+      border-color: #C05621;
+      color: #7B341E;
+    }
+
+    .balance-chip.chip-scale {
+      background: #EBF8FF;
+      border-color: #2B6CB0;
+      color: #2A4365;
+    }
+
+    .balance-chip.chip-pos {
+      background: #F0FFF4;
+      border-color: #2F855A;
+      color: #22543D;
+    }
+
+    .balance-chip.chip-warn {
+      background: #FAF089;
+      border-color: #B7791F;
+      color: #744210;
+    }
+
+    .balance-calibration-panel {
+      margin-top: 14px;
+      padding: 12px 14px;
+      background: linear-gradient(90deg, rgba(240, 90, 34, 0.08) 0%, rgba(230, 223, 197, 0.45) 100%);
+      border: 1px solid rgba(24, 24, 26, 0.35);
+      border-left: 4px solid var(--valve-orange);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .balance-calibration-meta {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--ink-secondary);
+      margin-bottom: 4px;
+    }
+
+    .balance-calibration-body {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink-primary);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-calibrate {
+      padding: 6px 14px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      background: var(--valve-orange);
+      color: #FFFFFF;
+      border: 1px solid var(--ink-primary);
+      cursor: pointer;
+      box-shadow: 2px 2px 0px var(--ink-primary);
+    }
+
+    .btn-calibrate:hover {
+      background: #D94B16;
     }
 
     /* A broken render must say so instead of leaving empty cards behind. */
@@ -1057,39 +1267,51 @@
 
       <!-- Balance against maintenance (expandable from corner) -->
       <div class="week-balance-drawer" id="balanceDrawer">
-        <div class="section-header" style="margin-bottom: 14px;">
+        <div class="balance-header-bar">
           <div>
-            <div class="section-title" id="balanceLabel">Bilance proti maintenance</div>
+            <div class="balance-title-row">
+              <div class="section-title" id="balanceLabel">Bilance proti maintenance</div>
+              <span class="balance-period-pill" id="balancePeriodDates">--</span>
+            </div>
             <div class="balance-btn-group">
-              <button type="button" class="balance-btn active" id="balBtnLatest" onclick="changeBalancePeriod('latest')">Poslední aktivní období</button>
-              <button type="button" class="balance-btn" id="balBtnMonth" onclick="changeBalancePeriod('month')">Září 2026</button>
-              <button type="button" class="balance-btn" id="balBtnCurrent" onclick="changeBalancePeriod('current')">Posledních 30 dní</button>
+              <button type="button" class="balance-btn active" id="balBtn30d" onclick="changeBalancePeriod('30d')">Posledních 30 dní</button>
+              <button type="button" class="balance-btn" id="balBtn90d" onclick="changeBalancePeriod('90d')">Poslední 3 měsíce</button>
+              <button type="button" class="balance-btn" id="balBtnActive" onclick="changeBalancePeriod('active')">Poslední aktivní období</button>
             </div>
           </div>
-          <div class="kpi-value" style="margin: 0; font-size: 22px;">
-            <span id="balanceKcal">--</span> <span class="kpi-unit">kcal</span>
+          <div class="balance-hero-box">
+            <div class="balance-hero-label">Bilance za období</div>
+            <div class="balance-hero-value">
+              <span id="balanceKcal">--</span> <span class="kpi-unit">kcal</span>
+            </div>
+            <div class="balance-hero-sub" id="balanceDailyAvg">--</div>
           </div>
         </div>
         <div class="balance-grid">
-          <div>
-            <div class="kpi-label">Příjem / maintenance</div>
-            <div class="kpi-subtext" id="balanceIntake">--</div>
+          <div class="balance-stat-card accent-energy">
+            <div class="kpi-label">Příjem vs. Maintenance</div>
+            <div class="balance-stat-value" id="balanceIntakeMain">--</div>
+            <div class="balance-stat-detail" id="balanceIntake">--</div>
           </div>
-          <div>
-            <div class="kpi-label">Odhad hmoty (svaly / tuk)</div>
-            <div class="kpi-subtext" id="balanceEstimate">--</div>
+          <div class="balance-stat-card accent-theory">
+            <div class="kpi-label">Teoretická změna hmoty</div>
+            <div class="balance-stat-value" id="balanceEstimateMain">--</div>
+            <div class="balance-stat-detail" id="balanceEstimate">--</div>
           </div>
-          <div>
-            <div class="kpi-label">Skutečná váha / odchylka</div>
-            <div class="kpi-subtext" id="balanceMeasured">--</div>
+          <div class="balance-stat-card accent-scale">
+            <div class="kpi-label">Skutečná změna (Ø 3 vážení)</div>
+            <div class="balance-stat-value" id="balanceMeasuredMain">--</div>
+            <div class="balance-stat-detail" id="balanceMeasured">--</div>
           </div>
+        </div>
+        <div class="balance-calibration-panel">
           <div>
-            <div class="kpi-label">Nový maintenance</div>
-            <div class="kpi-subtext">
-              <span id="balanceCalibration">--</span>
-              <button type="button" class="balance-btn" id="btnAcceptCalibration" onclick="acceptCalibration()" style="display: none; margin-left: 6px; padding: 2px 8px;">Přijmout</button>
+            <div class="balance-calibration-meta">
+              Nový maintenance • nezávisle na zvoleném okně (trend z 5 měření váhy, min. 2 týdny)
             </div>
+            <div class="balance-calibration-body" id="balanceCalibration">--</div>
           </div>
+          <button type="button" class="btn-calibrate" id="btnAcceptCalibration" onclick="acceptCalibration()" style="display: none;">Přijmout</button>
         </div>
       </div>
     </div>
@@ -1247,34 +1469,37 @@
       ]);
     }
 
-    let currentBalancePeriod = 'latest';
+    let currentBalancePeriod = '30d';
 
     function toggleBalance() {
       const card = document.getElementById('weekCard');
       if (card) card.classList.toggle('balance-open');
     }
 
+    function balanceQueryForPeriod(period) {
+      if (period === '90d') return '?period=90d&days=90';
+      if (period === 'active') return '?period=active';
+      return '?days=30';
+    }
+
     async function changeBalancePeriod(period) {
       currentBalancePeriod = period;
-      const btnLatest = document.getElementById('balBtnLatest');
-      const btnMonth = document.getElementById('balBtnMonth');
-      const btnCurrent = document.getElementById('balBtnCurrent');
-      if (btnLatest) btnLatest.classList.toggle('active', period === 'latest');
-      if (btnMonth) btnMonth.classList.toggle('active', period === 'month');
-      if (btnCurrent) btnCurrent.classList.toggle('active', period === 'current');
+      const btn30d = document.getElementById('balBtn30d');
+      const btn90d = document.getElementById('balBtn90d');
+      const btnActive = document.getElementById('balBtnActive');
+      if (btn30d) btn30d.classList.toggle('active', period === '30d');
+      if (btn90d) btn90d.classList.toggle('active', period === '90d');
+      if (btnActive) btnActive.classList.toggle('active', period === 'active');
 
-      let query = '';
-      if (period === 'month') {
-        query = '?end_date=2026-09-30&days=30';
-      } else if (period === 'current') {
-        query = '?end_date=' + todayIso() + '&days=30';
-      }
-      await loadBalance(query);
+      await loadBalance(balanceQueryForPeriod(period));
     }
 
     async function loadBalance(queryParam = '') {
       try {
-        const url = queryParam ? `/api/balance${queryParam}` : '/api/balance?days=30';
+        const effectiveQuery = queryParam || balanceQueryForPeriod(currentBalancePeriod);
+        const url = effectiveQuery === '?days=30'
+          ? '/api/balance?days=30'
+          : `/api/balance${effectiveQuery}`;
         const data = await (await fetch(url)).json();
         const balance = data.balance_kcal;
         const balanceEl = document.getElementById('balanceKcal');
@@ -1283,32 +1508,78 @@
         balanceEl.className = 'week-balance ' +
           (balance > 0 ? 'surplus' : balance < 0 ? 'deficit' : 'neutral');
 
-        document.getElementById('balanceLabel').textContent =
-          `Bilance proti maintenance (${formatDate(data.start_date)} až ${formatDate(data.end_date)})`;
+        document.getElementById('balanceLabel').textContent = 'Bilance proti maintenance';
+        const periodDatesEl = document.getElementById('balancePeriodDates');
+        if (periodDatesEl) {
+          periodDatesEl.textContent =
+            `${formatDate(data.start_date)} až ${formatDate(data.end_date)} (${data.logged_days}/${data.window_days} dní)`;
+        }
 
-        document.getElementById('balanceIntake').textContent =
-          `${Math.round(data.intake_kcal)} / ${Math.round(data.maintenance_kcal)} kcal | ` +
-          `${data.logged_days} z ${data.window_days} dní`;
+        const dailyAvgEl = document.getElementById('balanceDailyAvg');
+        if (dailyAvgEl) {
+          if (data.logged_days > 0) {
+            const avgDay = Math.round(balance / data.logged_days);
+            dailyAvgEl.textContent = `Ø ${avgDay > 0 ? '+' : ''}${avgDay} kcal / zaznamenaný den`;
+          } else {
+            dailyAvgEl.textContent = 'Bez záznamu v období';
+          }
+        }
+
+        const intakeMainEl = document.getElementById('balanceIntakeMain');
+        if (intakeMainEl) {
+          intakeMainEl.textContent = `${Math.round(data.intake_kcal)} / ${Math.round(data.maintenance_kcal)} kcal`;
+        }
+        const sharePct = Math.round((data.logged_share || 0) * 100);
+        const shareChipClass = sharePct >= 70 ? 'chip-pos' : 'chip-warn';
+        document.getElementById('balanceIntake').innerHTML =
+          `<span class="balance-chip ${shareChipClass}">${data.logged_days} z ${data.window_days} dní (${sharePct} %)</span>`;
 
         const estimate = data.estimated_kg;
-        document.getElementById('balanceEstimate').textContent = data.logged_days
-          ? `${estimate > 0 ? '+' : ''}${estimate.toFixed(2)} kg` +
-            (data.surplus
-              ? ` (svaly ${data.estimated_lean_kg.toFixed(2)} kg, tuk ${data.estimated_fat_kg.toFixed(2)} kg)`
-              : '')
-          : 'bez záznamu';
+        const estimateMainEl = document.getElementById('balanceEstimateMain');
+        if (estimateMainEl) {
+          if (data.logged_days) {
+            estimateMainEl.textContent = `${estimate > 0 ? '+' : ''}${estimate.toFixed(2)} kg`;
+            estimateMainEl.className = 'balance-stat-value ' +
+              (estimate > 0 ? 'pos' : estimate < 0 ? 'neg' : '');
+          } else {
+            estimateMainEl.textContent = '--';
+            estimateMainEl.className = 'balance-stat-value';
+          }
+        }
+        document.getElementById('balanceEstimate').innerHTML = data.logged_days
+          ? (data.surplus
+              ? `<span class="balance-chip chip-muscle">Svaly +${data.estimated_lean_kg.toFixed(2)} kg</span>` +
+                `<span class="balance-chip chip-fat">Tuk +${data.estimated_fat_kg.toFixed(2)} kg</span>`
+              : `<span class="balance-chip chip-fat">Tuk ${data.estimated_fat_kg.toFixed(2)} kg</span>`)
+          : '<span class="balance-chip">bez záznamu</span>';
 
+        const measuredMainEl = document.getElementById('balanceMeasuredMain');
         if (data.measured_kg === null) {
-          document.getElementById('balanceMeasured').textContent = '--';
+          if (measuredMainEl) {
+            measuredMainEl.textContent = '--';
+            measuredMainEl.className = 'balance-stat-value';
+          }
+          document.getElementById('balanceMeasured').innerHTML =
+            '<span class="balance-chip chip-warn">Méně než 2 vážení v období</span>';
         } else {
+          if (measuredMainEl) {
+            measuredMainEl.textContent =
+              `${data.measured_kg > 0 ? '+' : ''}${data.measured_kg.toFixed(2)} kg`;
+            measuredMainEl.className = 'balance-stat-value ' +
+              (data.measured_kg > 0 ? 'pos' : data.measured_kg < 0 ? 'neg' : '');
+          }
           const percent = data.deviation_percent;
           const startWeight = data.first_weight_kg != null ? `${data.first_weight_kg.toFixed(1)} kg` : '';
           const endWeight = data.last_weight_kg != null ? `${data.last_weight_kg.toFixed(1)} kg` : '';
-          const weightRange = startWeight && endWeight ? ` (${startWeight} -> ${endWeight})` : '';
-          document.getElementById('balanceMeasured').textContent =
-            `${data.measured_kg > 0 ? '+' : ''}${data.measured_kg.toFixed(2)} kg${weightRange} | ` +
-            `odchylka ${data.deviation_kg > 0 ? '+' : ''}${data.deviation_kg.toFixed(2)} kg` +
+          const avgCount = data.end_weights_averaged || 1;
+          const weightRange = startWeight && endWeight
+            ? `<span class="balance-chip chip-scale">${startWeight} → Ø ${endWeight} (${avgCount} vážení)</span>`
+            : '';
+          const devText =
+            `Odchylka ${data.deviation_kg > 0 ? '+' : ''}${data.deviation_kg.toFixed(2)} kg` +
             (percent !== null ? ` (${percent > 0 ? '+' : ''}${percent.toFixed(0)} %)` : '');
+          document.getElementById('balanceMeasured').innerHTML =
+            `${weightRange}<span class="balance-chip">${devText}</span>`;
         }
 
         const cal = data.calibration;
@@ -1316,20 +1587,31 @@
         const calBtn = document.getElementById('btnAcceptCalibration');
         if (cal && calEl && calBtn) {
           if (!cal.ready) {
-            calEl.textContent = `${cal.weigh_ins_count} / ${cal.required_weigh_ins} vážení`;
+            const spanDays = cal.weigh_in_span_days != null ? `${cal.weigh_in_span_days}` : '0';
+            const reqSpan = cal.min_span_days || 14;
+            calEl.innerHTML =
+              `<span class="balance-chip chip-warn">${cal.weigh_ins_count} / ${cal.required_weigh_ins} vážení</span>` +
+              `<span class="balance-chip">okno ${spanDays} / min. ${reqSpan} dní</span>`;
             calBtn.style.display = 'none';
           } else {
             const delta = Math.round(cal.recommended_delta_kcal || 0);
             const rec = Math.round(cal.recommended_maintenance_kcal || 0);
             const slopeWeek = typeof cal.slope_kg_per_week === 'number'
-              ? ` | trend ${cal.slope_kg_per_week > 0 ? '+' : ''}${cal.slope_kg_per_week.toFixed(2)} kg/týden`
+              ? `<span class="balance-chip chip-scale">trend ${cal.slope_kg_per_week > 0 ? '+' : ''}${cal.slope_kg_per_week.toFixed(2)} kg/týden (${cal.weigh_ins_count} vážení, ${cal.weigh_in_span_days} dní)</span>`
               : '';
             if (Math.abs(delta) >= 1) {
               const sign = delta > 0 ? '+' : '';
-              calEl.textContent = `${rec} kcal/den (${sign}${delta} kcal)${slopeWeek}`;
+              const deltaClass = delta > 0 ? 'chip-pos' : 'chip-fat';
+              calEl.innerHTML =
+                `<span>${rec} kcal/den</span>` +
+                `<span class="balance-chip ${deltaClass}">${sign}${delta} kcal</span>` +
+                slopeWeek;
               calBtn.style.display = 'inline-block';
             } else {
-              calEl.textContent = `${rec} kcal/den (kalibrováno)${slopeWeek}`;
+              calEl.innerHTML =
+                `<span>${rec} kcal/den</span>` +
+                `<span class="balance-chip chip-pos">kalibrováno</span>` +
+                slopeWeek;
               calBtn.style.display = 'none';
             }
           }
@@ -1344,13 +1626,7 @@
       const btn = document.getElementById('btnAcceptCalibration');
       if (btn) btn.disabled = true;
       try {
-        let query = '?days=30';
-        if (currentBalancePeriod === 'month') {
-          query = '?end_date=2026-09-30&days=30';
-        } else if (currentBalancePeriod === 'current') {
-          query = `?end_date=${todayIso()}&days=30`;
-        }
-        const res = await fetch(`/api/balance/calibrate${query}`, { method: 'POST' });
+        const res = await fetch('/api/balance/calibrate', { method: 'POST' });
         if (!res.ok) {
           throw new Error(await describeApiError(res));
         }

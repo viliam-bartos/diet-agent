@@ -227,14 +227,25 @@ def test_dashboard_shows_the_maintenance_balance(api_client: TestClient):
         "balanceCalibration",
         "btnAcceptCalibration",
         "balanceDrawer",
+        "balBtn30d",
+        "balBtn90d",
+        "balBtnActive",
     ):
         assert f'id="{element}"' in body, element
 
     assert "Bilance proti maintenance" in body
+    assert "Poslední 3 měsíce" in body
+    assert "Poslední aktivní období" in body
     assert "/api/balance?days=30" in body
     assert "/api/balance/calibrate" in body
     assert "toggleBalance()" in body
     assert "week-corner-toggle" in body
+
+    active = api_client.get("/api/balance", params={"period": "active"}).json()
+    assert active["period"] == "active"
+    three_months = api_client.get("/api/balance", params={"period": "90d"}).json()
+    assert three_months["period"] == "90d"
+    assert three_months["window_days"] == 90
 
 
 def test_dashboard_heatmap_legend_has_colours(api_client: TestClient):

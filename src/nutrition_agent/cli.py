@@ -58,9 +58,11 @@ from nutrition_agent.repository import (
     save_unit_conversion,
     save_weight_log,
     save_workout_log,
+    set_calorie_target,
     set_day_type,
     set_user_setting,
     update_food_nutrition,
+    _record_target_change,
 )
 from nutrition_agent.targets import (
     calculate_daily_targets,
@@ -400,11 +402,32 @@ def handle_user_message(
     parts = clean_input.split(maxsplit=1)
     first_token = parts[0].lower()
     if first_token in ("cil", "cíl", "stav", "goal") and len(parts) > 1:
+        raw_goal_arg = parts[1].strip()
+        cal_match = re.match(r"^(\d+(?:[.,]\d+)?)\s*(?:kcal|kalorii|kalorií)?$", raw_goal_arg, re.I)
+        if cal_match:
+            try:
+                desired_kcal = float(cal_match.group(1).replace(",", "."))
+                set_calorie_target(conn, desired_kcal, effective_date=target_day)
+            except ValueError as exc:
+                return str(exc)
+            goal, day_type, weight = get_user_profile(conn)
+            targets = calculate_daily_targets(
+                weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
+            )
+            return (
+                f"Kalorický cíl byl změněn na: {targets.calories:.0f} kcal "
+                f"(předchozí dny zůstávají beze změny).\n"
+                f"Přepočtené denní cíle ({weight:.1f} kg, {day_type.value}):\n"
+                f"Energie: {targets.calories:.0f} kcal | "
+                f"Bílkoviny: {targets.protein_usable:.1f} g DIAAS | "
+                f"Sacharidy: {targets.carbs:.1f} g | "
+                f"Tuky: {targets.fats:.1f} g"
+            )
         try:
-            goal = parse_goal(parts[1])
+            goal = parse_goal(raw_goal_arg)
         except ValueError as exc:
             return str(exc)
-        set_user_setting(conn, "goal", goal.value)
+        set_user_setting(conn, "goal", goal.value, effective_date=target_day)
         _, day_type, weight = get_user_profile(conn)
         targets = calculate_daily_targets(
             weight, goal, day_type, calorie_offset=get_calorie_offset(conn)
@@ -530,6 +553,8 @@ def handle_user_message(
         except WeightValidationError as exc:
             return f"Chyba validace: {exc}"
 
+        prev_goal, _, prev_weight = get_user_profile(conn)
+        prev_offset = get_calorie_offset(conn)
         weight_log = CalculatedWeightLog(
             raw_input=clean_input,
             weight_kg=valid_weight,
@@ -537,6 +562,19 @@ def handle_user_message(
         if logged_at:
             weight_log = weight_log.model_copy(update={"logged_at": logged_at})
         save_weight_log(conn, weight_log)
+
+        eff_day = target_day or local_date(utc_now_iso())
+        _record_target_change(
+            conn,
+            eff_day,
+            prev_goal,
+            prev_offset,
+            prev_weight,
+            prev_goal,
+            prev_offset,
+            valid_weight,
+        )
+        conn.commit()
 
         goal, day_type, _ = get_user_profile(conn)
         new_targets = calculate_daily_targets(

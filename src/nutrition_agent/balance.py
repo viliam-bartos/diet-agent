@@ -44,8 +44,16 @@ GAIN_KCAL_PER_KG: float = 6850.0
 # Below this share of logged days the balance is a guess, not a measurement.
 MIN_LOGGED_SHARE: float = 0.70
 
-# Minimum weigh-ins required in a period to calibrate the maintenance baseline.
-MIN_CALIBRATION_WEIGH_INS: int = 2
+# Minimum weigh-ins and minimum calendar span required to calibrate maintenance:
+# Calibration trend is computed strictly from 5 weigh-ins spanning at least 2 weeks (14 days).
+MIN_CALIBRATION_WEIGH_INS: int = 5
+MIN_CALIBRATION_SPAN_DAYS: int = 14
+
+# Maximum gap (in days) between consecutive food-logged days in an "active period".
+MAX_ACTIVE_GAP_DAYS: int = 7
+
+# Number of most recent weigh-ins averaged for the actual weight change in a balance window.
+BALANCE_END_WEIGH_INS_AVG: int = 3
 
 
 @dataclass(frozen=True)
@@ -218,6 +226,51 @@ def _cumulative_surplus_slope(
     return sum((u - mean_u) * (e - mean_e) for u, e in zip(us, es, strict=True)) / denom
 
 
+def _weigh_in_span_days(daily_weights: list[tuple[str, float]]) -> int:
+    """Return inclusive calendar span in days between first and last weigh-in."""
+    if not daily_weights:
+        return 0
+    start_dt = datetime.strptime(daily_weights[0][0], "%Y-%m-%d")
+    end_dt = datetime.strptime(daily_weights[-1][0], "%Y-%m-%d")
+    return max((end_dt - start_dt).days + 1, 1)
+
+
+def _select_calibration_weigh_ins(
+    all_daily_weights: list[tuple[str, float]],
+    count: int = MIN_CALIBRATION_WEIGH_INS,
+    min_span_days: int = MIN_CALIBRATION_SPAN_DAYS,
+) -> list[tuple[str, float]]:
+    """Select strictly `count` (5) weigh-ins spanning at least `min_span_days` (14 days).
+
+    Uses the last `count` weigh-ins when they already span at least `min_span_days`.
+    When the last `count` weigh-ins are clustered inside a shorter window while older
+    weigh-ins exist across >= `min_span_days`, selects `count` evenly spaced weigh-ins
+    across the shortest recent suffix that meets `min_span_days`.
+    """
+    if len(all_daily_weights) <= count:
+        return list(all_daily_weights)
+
+    last_n = all_daily_weights[-count:]
+    if _weigh_in_span_days(last_n) >= min_span_days:
+        return last_n
+
+    end_dt = datetime.strptime(all_daily_weights[-1][0], "%Y-%m-%d")
+    chosen_start_idx: int | None = None
+    for idx in range(len(all_daily_weights) - count - 1, -1, -1):
+        start_dt = datetime.strptime(all_daily_weights[idx][0], "%Y-%m-%d")
+        if (end_dt - start_dt).days + 1 >= min_span_days:
+            chosen_start_idx = idx
+            break
+
+    if chosen_start_idx is None:
+        return last_n
+
+    window = all_daily_weights[chosen_start_idx:]
+    m = len(window)
+    indices = [round(i * (m - 1) / (count - 1)) for i in range(count)]
+    return [window[idx] for idx in indices]
+
+
 def build_maintenance_calibration(
     conn,
     start_day: str | None = None,
@@ -225,32 +278,51 @@ def build_maintenance_calibration(
     days: int = 30,
     ref_date: datetime | None = None,
     min_weigh_ins: int = MIN_CALIBRATION_WEIGH_INS,
+    min_span_days: int = MIN_CALIBRATION_SPAN_DAYS,
 ) -> dict[str, object]:
-    """Compute calibrated maintenance using OLS weight slope and cumulative energy balance."""
-    if not (start_day and end_day):
-        start_day, end_day = _window(days, ref_date)
+    """Compute calibrated maintenance from strictly 5 weigh-ins over >= 14 days."""
+    upper_day = end_day or _window(days, ref_date)[1]
 
-    summaries = get_day_summaries(conn, start_day, end_day)
-    logged_days = [day for day in summaries if day["has_food"]]
+    if start_day and end_day:
+        weights = get_weight_logs_between_days(conn, start_day, end_day)
+    else:
+        weights = get_weight_logs_between_days(conn, "0001-01-01", upper_day)
+        if not weights and ref_date is None:
+            weights = get_weight_logs_in_range(conn)
 
-    weights = get_weight_logs_between_days(conn, start_day, end_day)
-    daily_weights = _daily_weights_from_logs(weights)
+    all_daily_weights = _daily_weights_from_logs(weights)
+    selected_weights = _select_calibration_weigh_ins(
+        all_daily_weights, count=min_weigh_ins, min_span_days=min_span_days
+    )
 
     calorie_offset = get_calorie_offset(conn)
+    observed_span_days = _weigh_in_span_days(selected_weights) if len(selected_weights) >= 2 else None
+
+    if selected_weights:
+        cal_start_day = selected_weights[0][0]
+        cal_end_day = selected_weights[-1][0]
+    else:
+        cal_start_day, cal_end_day = _window(days, ref_date)
+
+    summaries = get_day_summaries(conn, cal_start_day, cal_end_day)
+    logged_days = [day for day in summaries if day["has_food"]]
     span_days = max(len(summaries), 1)
 
-    all_weights_count = len({local_date(log.logged_at) for log in get_weight_logs_in_range(conn)})
-    weigh_ins_count = len(daily_weights) or all_weights_count
-
-    if len(daily_weights) < min_weigh_ins or not logged_days:
+    if (
+        len(selected_weights) < min_weigh_ins
+        or observed_span_days is None
+        or observed_span_days < min_span_days
+        or not logged_days
+    ):
         return {
             "ready": False,
-            "weigh_ins_count": weigh_ins_count,
+            "weigh_ins_count": len(selected_weights),
             "required_weigh_ins": min_weigh_ins,
-            "start_date": start_day,
-            "end_date": end_day,
+            "min_span_days": min_span_days,
+            "start_date": cal_start_day,
+            "end_date": cal_end_day,
             "span_days": span_days,
-            "weigh_in_span_days": None,
+            "weigh_in_span_days": observed_span_days,
             "logged_days": len(logged_days),
             "trend_start_kg": None,
             "trend_end_kg": None,
@@ -269,12 +341,11 @@ def build_maintenance_calibration(
         delta_kg,
         slope_kg_per_day,
         weigh_in_span_days,
-    ) = _regression_weight_change(daily_weights)
+    ) = _regression_weight_change(selected_weights)
 
     _, _, weight_kg = get_user_profile(conn)
     intake_kcal = 0.0
     maintenance_kcal = 0.0
-    daily_surplus_by_day: dict[str, float] = {}
     for day in logged_days:
         day_intake = float(day["calories"])
         maintenance = calculate_daily_targets(
@@ -285,28 +356,23 @@ def build_maintenance_calibration(
         )
         intake_kcal += day_intake
         maintenance_kcal += maintenance.calories
-        daily_surplus_by_day[str(day["date"])] = day_intake - maintenance.calories
 
     avg_intake_kcal = intake_kcal / len(logged_days)
     avg_maintenance_kcal = maintenance_kcal / len(logged_days)
     avg_surplus_kcal = avg_intake_kcal - avg_maintenance_kcal
 
-    effective_daily_surplus = _cumulative_surplus_slope(
-        daily_weights,
-        daily_surplus_by_day,
-        fallback_daily_surplus=avg_surplus_kcal,
-    )
     daily_tissue_kcal = energy_for_mass_change(slope_kg_per_day)
-    raw_delta_kcal = effective_daily_surplus - daily_tissue_kcal
+    raw_delta_kcal = avg_surplus_kcal - daily_tissue_kcal
     recommended_maintenance_kcal = round(avg_maintenance_kcal + raw_delta_kcal, 0)
     recommended_delta_kcal = round(recommended_maintenance_kcal - round(avg_maintenance_kcal, 0), 0)
 
     return {
         "ready": True,
-        "weigh_ins_count": len(daily_weights),
+        "weigh_ins_count": len(selected_weights),
         "required_weigh_ins": min_weigh_ins,
-        "start_date": start_day,
-        "end_date": end_day,
+        "min_span_days": min_span_days,
+        "start_date": cal_start_day,
+        "end_date": cal_end_day,
         "span_days": span_days,
         "weigh_in_span_days": weigh_in_span_days,
         "logged_days": len(logged_days),
@@ -330,6 +396,7 @@ def apply_maintenance_calibration(
     days: int = 30,
     ref_date: datetime | None = None,
     min_weigh_ins: int = MIN_CALIBRATION_WEIGH_INS,
+    min_span_days: int = MIN_CALIBRATION_SPAN_DAYS,
 ) -> dict[str, object]:
     """Persist the calibrated maintenance offset and shift all goal targets accordingly."""
     calibration = build_maintenance_calibration(
@@ -339,17 +406,20 @@ def apply_maintenance_calibration(
         days=days,
         ref_date=ref_date,
         min_weigh_ins=min_weigh_ins,
+        min_span_days=min_span_days,
     )
     if not calibration["ready"]:
         raise ValueError(
-            f"Pro kalibraci maintenance je potřeba alespoň {min_weigh_ins} vážení v daném období "
-            f"(aktuálně {calibration['weigh_ins_count']}) a záznamy jídla."
+            f"Pro kalibraci maintenance je potřeba alespoň {min_weigh_ins} vážení v okně "
+            f"minimálně {min_span_days} dní (aktuálně {calibration['weigh_ins_count']} vážení, "
+            f"okno {calibration['weigh_in_span_days'] or 0} dní) a záznamy jídla."
         )
 
     current_offset = get_calorie_offset(conn)
     delta_kcal = float(calibration["recommended_delta_kcal"] or 0.0)
     new_offset = round(current_offset + delta_kcal, 1)
-    set_calorie_offset(conn, new_offset)
+    effective_day = (ref_date or datetime.now()).strftime("%Y-%m-%d")
+    set_calorie_offset(conn, new_offset, effective_date=effective_day)
     set_user_setting(conn, "maintenance_calibrated_at", str(calibration["end_date"]))
 
     goal, day_type, weight_kg = get_user_profile(conn)
@@ -380,6 +450,7 @@ def apply_maintenance_calibration(
             days=days,
             ref_date=ref_date,
             min_weigh_ins=min_weigh_ins,
+            min_span_days=min_span_days,
         ),
     }
 
@@ -394,37 +465,98 @@ def _window(days: int, ref_date: datetime | None = None) -> tuple[str, str]:
     return start_day, end_day
 
 
+def active_period_window(
+    conn,
+    ref_date: datetime | None = None,
+    max_gap_days: int = MAX_ACTIVE_GAP_DAYS,
+) -> tuple[str, str]:
+    """Return the latest active logging period where gaps between logged days are <= 7 days."""
+    upper_day = _window(1, ref_date)[1]
+    rows = conn.execute(
+        """
+        SELECT DISTINCT date(logged_at, 'localtime') AS d
+        FROM food_logs
+        WHERE date(logged_at, 'localtime') <= ?
+        ORDER BY d ASC
+        """,
+        (upper_day,),
+    ).fetchall()
+    logged_dates = [str(row["d"]) for row in rows if row["d"]]
+    if not logged_dates and ref_date is None:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT date(logged_at, 'localtime') AS d
+            FROM food_logs
+            ORDER BY d ASC
+            """
+        ).fetchall()
+        logged_dates = [str(row["d"]) for row in rows if row["d"]]
+
+    if not logged_dates:
+        return _window(30, ref_date)
+
+    end_day = logged_dates[-1]
+    start_day = end_day
+    curr_dt = datetime.strptime(end_day, "%Y-%m-%d")
+
+    for prev_str in reversed(logged_dates[:-1]):
+        prev_dt = datetime.strptime(prev_str, "%Y-%m-%d")
+        if (curr_dt - prev_dt).days <= max_gap_days:
+            start_day = prev_str
+            curr_dt = prev_dt
+        else:
+            break
+
+    return start_day, end_day
+
+
 def build_balance_verdict(
     conn,
     days: int = 30,
     ref_date: datetime | None = None,
     auto_fallback: bool = True,
+    period: str | None = None,
 ) -> dict[str, object]:
     """Compare the finished window against maintenance and check it against the scale.
 
     Only days with logged food enter the comparison, and maintenance is summed over the
-    same days, so an untracked day neither creates a deficit nor hides one. The check
-    against the scale needs at least two weigh-ins inside the window; without them the
-    deviation is left unknown instead of being guessed.
+    same days, so an untracked day neither creates a deficit nor hides one. Actual weight
+    change compares the first weigh-in of the period against the average of the last three
+    weigh-ins in the period. Maintenance calibration is computed independently from 5
+    weigh-ins over >= 14 days, never from the selected balance window.
     """
+    period_norm = (period or "").strip().lower()
+    if period_norm in ("90d", "3m", "3months"):
+        days = 90
+        period_key = "90d"
+    elif period_norm in ("active", "latest"):
+        period_key = "active"
+    else:
+        period_key = f"{days}d"
+
     if days < 1:
         raise ValueError("Počet dní musí být kladné číslo.")
 
-    start_day, end_day = _window(days, ref_date)
-    summaries = get_day_summaries(conn, start_day, end_day)
-    logged_days = [day for day in summaries if day["has_food"]]
-
     fallback_applied = False
-    if not logged_days and ref_date is None and auto_fallback:
-        cursor = conn.execute("SELECT MAX(logged_at) as last_log FROM food_logs")
-        row = cursor.fetchone()
-        if row and row["last_log"]:
-            last_date_str = local_date(row["last_log"])
-            fallback_ref = datetime.strptime(last_date_str, "%Y-%m-%d") + timedelta(days=1)
-            start_day, end_day = _window(days, fallback_ref)
-            summaries = get_day_summaries(conn, start_day, end_day)
-            logged_days = [day for day in summaries if day["has_food"]]
-            fallback_applied = True
+    if period_key == "active":
+        start_day, end_day = active_period_window(conn, ref_date=ref_date)
+        summaries = get_day_summaries(conn, start_day, end_day)
+        logged_days = [day for day in summaries if day["has_food"]]
+    else:
+        start_day, end_day = _window(days, ref_date)
+        summaries = get_day_summaries(conn, start_day, end_day)
+        logged_days = [day for day in summaries if day["has_food"]]
+
+        if not logged_days and ref_date is None and auto_fallback:
+            cursor = conn.execute("SELECT MAX(logged_at) as last_log FROM food_logs")
+            row = cursor.fetchone()
+            if row and row["last_log"]:
+                last_date_str = local_date(row["last_log"])
+                fallback_ref = datetime.strptime(last_date_str, "%Y-%m-%d") + timedelta(days=1)
+                start_day, end_day = _window(days, fallback_ref)
+                summaries = get_day_summaries(conn, start_day, end_day)
+                logged_days = [day for day in summaries if day["has_food"]]
+                fallback_applied = True
 
     goal, _, weight_kg = get_user_profile(conn)
     calorie_offset = get_calorie_offset(conn)
@@ -447,11 +579,18 @@ def build_balance_verdict(
     weights = get_weight_logs_between_days(conn, start_day, end_day)
     weights.sort(key=lambda log: log.logged_at)
     daily_weights = _daily_weights_from_logs(weights)
+    end_weights_averaged = 0
     if len(daily_weights) >= 2:
-        first_weight, last_weight, measured_change, _, _ = _regression_weight_change(daily_weights)
+        first_weight = round(daily_weights[0][1], 2)
+        tail_weights = [w for _, w in daily_weights[1:][-BALANCE_END_WEIGH_INS_AVG:]]
+        end_weights_averaged = len(tail_weights)
+        last_weight = round(sum(tail_weights) / len(tail_weights), 2)
+        measured_change = round(last_weight - first_weight, 2)
     else:
-        first_weight = weights[0].weight_kg if weights else None
-        last_weight = weights[-1].weight_kg if len(weights) >= 2 else None
+        first_weight = round(weights[0].weight_kg, 2) if weights else None
+        last_weight = round(weights[-1].weight_kg, 2) if len(weights) >= 2 else None
+        if last_weight is not None:
+            end_weights_averaged = 1
         measured_change = (
             round(last_weight - first_weight, 2)
             if first_weight is not None and last_weight is not None
@@ -498,6 +637,7 @@ def build_balance_verdict(
         warnings.append("V tomto okně není žádný záznam jídla.")
 
     return {
+        "period": period_key,
         "start_date": start_day,
         "end_date": end_day,
         "window_days": len(summaries),
@@ -515,6 +655,7 @@ def build_balance_verdict(
         "kcal_per_kg": round(estimate.kcal_per_kg, 0),
         "first_weight_kg": first_weight,
         "last_weight_kg": last_weight,
+        "end_weights_averaged": end_weights_averaged,
         "measured_kg": measured_change,
         "deviation_kg": deviation,
         "deviation_percent": deviation_percent,
@@ -523,7 +664,6 @@ def build_balance_verdict(
         "today": local_date(utc_now_iso()),
         "calibration": build_maintenance_calibration(
             conn,
-            start_day=start_day,
-            end_day=end_day,
+            ref_date=ref_date,
         ),
     }
